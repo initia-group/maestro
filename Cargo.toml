@@ -5,6 +5,13 @@ edition = "2021"
 rust-version = "1.75"
 description = "TUI agent dashboard for Claude Code"
 license = "MIT"
+authors = ["MarcelSauter"]
+repository = "https://github.com/initia-group/maestro"
+homepage = "https://github.com/initia-group/maestro"
+readme = "README.md"
+keywords = ["tui", "claude", "agent", "terminal", "dashboard"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["docs/", "examples/", ".github/", "config/"]
 
 [dependencies]
 # TUI — Option B (compatible versions per Feature 00)
