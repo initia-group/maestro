@@ -1,0 +1,27 @@
+[global]
+claude_binary = "claude"
+default_shell = "/bin/zsh"
+max_agents = 15
+log_dir = "~/.local/share/maestro/logs"
+state_check_interval_ms = 250
+idle_timeout_secs = 3
+
+[ui]
+fps = 30
+sidebar_width = 28
+default_layout = "single"
+show_uptime = true
+mouse_enabled = true
+
+[ui.theme]
+name = "default"
+
+[notifications]
+enabled = true
+cooldown_secs = 10
+notify_on_input_prompt = false
+
+[session]
+enabled = true
+autosave_interval_secs = 60
+max_scrollback_bytes = 5242880
