@@ -1,3 +1,5 @@
+# Template — the live formula is auto-generated in initia-group/homebrew-tap
+# by the release workflow. Edit .github/workflows/release.yml to change the formula.
 class Maestro < Formula
   desc "TUI agent dashboard for Claude Code"
   homepage "https://github.com/initia-group/maestro"
