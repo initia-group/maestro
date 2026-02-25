@@ -206,7 +206,10 @@ impl<'a> StatusBar<'a> {
     /// Build the mode indicator span (right section).
     fn build_mode_span(&self) -> Span<'a> {
         let (text, style) = match self.mode {
-            InputMode::Normal => ("-- NORMAL --".to_string(), self.theme.status_bar_mode_normal),
+            InputMode::Normal => (
+                "-- NORMAL --".to_string(),
+                self.theme.status_bar_mode_normal,
+            ),
             InputMode::Insert { ref agent_name } => (
                 format!("-- INSERT ({}) --", agent_name),
                 self.theme.status_bar_mode_insert,
@@ -600,11 +603,7 @@ mod tests {
         bar.render(area, &mut buf);
 
         let content = buf_to_string(&buf);
-        assert!(
-            content.contains("1 running"),
-            "missing counts: {}",
-            content
-        );
+        assert!(content.contains("1 running"), "missing counts: {}", content);
         assert!(
             content.contains("-- NORMAL --"),
             "missing mode: {}",

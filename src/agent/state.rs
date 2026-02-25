@@ -24,14 +24,10 @@ use chrono::{DateTime, Utc};
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentState {
     /// Agent process is starting up. No output received yet.
-    Spawning {
-        since: DateTime<Utc>,
-    },
+    Spawning { since: DateTime<Utc> },
 
     /// Agent is actively producing output.
-    Running {
-        since: DateTime<Utc>,
-    },
+    Running { since: DateTime<Utc> },
 
     /// Agent is waiting for user input (tool approval, question, etc.).
     WaitingForInput {
@@ -40,9 +36,7 @@ pub enum AgentState {
     },
 
     /// Agent has not produced output for `idle_timeout_secs`.
-    Idle {
-        since: DateTime<Utc>,
-    },
+    Idle { since: DateTime<Utc> },
 
     /// Agent process exited successfully (exit code 0).
     Completed {
@@ -109,7 +103,10 @@ impl AgentState {
     /// Whether the agent is in a terminal state (no further transitions
     /// possible without explicit restart).
     pub fn is_terminal(&self) -> bool {
-        matches!(self, AgentState::Completed { .. } | AgentState::Errored { .. })
+        matches!(
+            self,
+            AgentState::Completed { .. } | AgentState::Errored { .. }
+        )
     }
 
     /// Whether the agent's process is still running.
@@ -160,14 +157,10 @@ impl std::fmt::Display for AgentState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PromptType {
     /// Agent is asking for tool approval (e.g., "Allow Edit to src/auth.rs? [Y/n]").
-    ToolApproval {
-        tool_name: String,
-    },
+    ToolApproval { tool_name: String },
 
     /// Agent is showing an interactive AskUserQuestion prompt with numbered options.
-    AskUserQuestion {
-        question: String,
-    },
+    AskUserQuestion { question: String },
 
     /// Agent is asking a question to the user (text ending with ?).
     Question,
@@ -260,8 +253,14 @@ mod tests {
 
     #[test]
     fn test_color_keys() {
-        assert_eq!(AgentState::Spawning { since: Utc::now() }.color_key(), "spawning");
-        assert_eq!(AgentState::Running { since: Utc::now() }.color_key(), "running");
+        assert_eq!(
+            AgentState::Spawning { since: Utc::now() }.color_key(),
+            "spawning"
+        );
+        assert_eq!(
+            AgentState::Running { since: Utc::now() }.color_key(),
+            "running"
+        );
         assert_eq!(
             AgentState::WaitingForInput {
                 since: Utc::now(),
@@ -291,7 +290,10 @@ mod tests {
 
     #[test]
     fn test_labels() {
-        assert_eq!(AgentState::Spawning { since: Utc::now() }.label(), "spawning");
+        assert_eq!(
+            AgentState::Spawning { since: Utc::now() }.label(),
+            "spawning"
+        );
         assert_eq!(AgentState::Running { since: Utc::now() }.label(), "running");
         assert_eq!(
             AgentState::WaitingForInput {
@@ -366,7 +368,10 @@ mod tests {
 
     #[test]
     fn test_display() {
-        assert_eq!(AgentState::Running { since: Utc::now() }.to_string(), "running");
+        assert_eq!(
+            AgentState::Running { since: Utc::now() }.to_string(),
+            "running"
+        );
         assert_eq!(
             AgentState::Completed {
                 at: Utc::now(),
@@ -457,14 +462,18 @@ mod tests {
         let t1 = Utc::now();
         let t2 = t1 + chrono::Duration::seconds(5);
         assert!(AgentState::Running { since: t1 }.same_variant(&AgentState::Running { since: t2 }));
-        assert!(AgentState::Spawning { since: t1 }.same_variant(&AgentState::Spawning { since: t2 }));
+        assert!(
+            AgentState::Spawning { since: t1 }.same_variant(&AgentState::Spawning { since: t2 })
+        );
         assert!(AgentState::Idle { since: t1 }.same_variant(&AgentState::Idle { since: t2 }));
     }
 
     #[test]
     fn test_same_variant_different_variants() {
         let now = Utc::now();
-        assert!(!AgentState::Running { since: now }.same_variant(&AgentState::Spawning { since: now }));
+        assert!(
+            !AgentState::Running { since: now }.same_variant(&AgentState::Spawning { since: now })
+        );
         assert!(!AgentState::Running { since: now }.same_variant(&AgentState::Idle { since: now }));
     }
 

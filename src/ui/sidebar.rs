@@ -76,10 +76,7 @@ impl SidebarState {
     /// `projects` is an ordered list of `(project_name, agents)` where each
     /// agent is `(id, name, state, uptime)`. This avoids coupling to
     /// `AgentManager` directly, making the sidebar testable in isolation.
-    pub fn rebuild(
-        &mut self,
-        projects: &[ProjectAgents],
-    ) {
+    pub fn rebuild(&mut self, projects: &[ProjectAgents]) {
         self.items.clear();
 
         for (project_name, agents) in projects {
@@ -459,9 +456,9 @@ impl<'a> Sidebar<'a> {
                 AgentState::WaitingForInput { prompt_type, .. } => match prompt_type {
                     PromptType::ToolApproval { .. } => Some("\u{25C0} approve"), // "◀ approve"
                     PromptType::AskUserQuestion { .. } => Some("\u{25C0} answer"), // "◀ answer"
-                    PromptType::Question => Some("\u{25C0} reply"),                // "◀ reply"
-                    PromptType::InputPrompt => Some("\u{25C0} input"),             // "◀ input"
-                    PromptType::Unknown => Some("\u{25C0} input"),                 // "◀ input"
+                    PromptType::Question => Some("\u{25C0} reply"),              // "◀ reply"
+                    PromptType::InputPrompt => Some("\u{25C0} input"),           // "◀ input"
+                    PromptType::Unknown => Some("\u{25C0} input"),               // "◀ input"
                 },
                 _ => unreachable!(),
             }
@@ -565,18 +562,14 @@ mod tests {
                     (
                         id1,
                         "backend".to_string(),
-                        AgentState::Running {
-                            since: Utc::now(),
-                        },
+                        AgentState::Running { since: Utc::now() },
                         "5m".to_string(),
                         false,
                     ),
                     (
                         id2,
                         "frontend".to_string(),
-                        AgentState::Idle {
-                            since: Utc::now(),
-                        },
+                        AgentState::Idle { since: Utc::now() },
                         "2m".to_string(),
                         false,
                     ),
@@ -874,10 +867,7 @@ mod tests {
 
     #[test]
     fn truncate_long_name() {
-        assert_eq!(
-            truncate_name("this-is-a-very-long-name", 10),
-            "this-is-a…"
-        );
+        assert_eq!(truncate_name("this-is-a-very-long-name", 10), "this-is-a…");
     }
 
     #[test]
@@ -980,9 +970,7 @@ mod tests {
             agents.push((
                 AgentId::new(),
                 format!("agent-{}", i),
-                AgentState::Running {
-                    since: Utc::now(),
-                },
+                AgentState::Running { since: Utc::now() },
                 String::new(),
                 false,
             ));

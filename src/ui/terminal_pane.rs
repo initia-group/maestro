@@ -44,9 +44,7 @@ impl TextSelection {
 
     /// Normalize start/end so start <= end (top-left to bottom-right).
     pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
-        if self.start.0 < self.end.0
-            || (self.start.0 == self.end.0 && self.start.1 <= self.end.1)
-        {
+        if self.start.0 < self.end.0 || (self.start.0 == self.end.0 && self.start.1 <= self.end.1) {
             (self.start, self.end)
         } else {
             (self.end, self.start)
@@ -326,11 +324,7 @@ fn render_selection_highlight(buf: &mut Buffer, pane_area: Rect, selection: &Tex
         }
 
         let start_col = if row == sr { sc } else { 0 };
-        let end_col = if row == er {
-            ec + 1
-        } else {
-            pane_area.width
-        };
+        let end_col = if row == er { ec + 1 } else { pane_area.width };
 
         for col in start_col..end_col.min(pane_area.width) {
             let x = pane_area.x + col;
@@ -506,13 +500,11 @@ mod tests {
         let theme = Theme::default_dark();
 
         // Just verify both focused and unfocused render without panic
-        let pane_focused =
-            TerminalPane::new(parser.screen(), "a", "p", &state, true, &theme);
+        let pane_focused = TerminalPane::new(parser.screen(), "a", "p", &state, true, &theme);
         let mut buf = Buffer::empty(Rect::new(0, 0, 42, 12));
         pane_focused.render(Rect::new(0, 0, 42, 12), &mut buf);
 
-        let pane_unfocused =
-            TerminalPane::new(parser.screen(), "a", "p", &state, false, &theme);
+        let pane_unfocused = TerminalPane::new(parser.screen(), "a", "p", &state, false, &theme);
         let mut buf2 = Buffer::empty(Rect::new(0, 0, 42, 12));
         pane_unfocused.render(Rect::new(0, 0, 42, 12), &mut buf2);
     }
@@ -542,8 +534,7 @@ mod tests {
         ];
 
         for state in &states {
-            let pane =
-                TerminalPane::new(parser.screen(), "agent", "project", state, true, &theme);
+            let pane = TerminalPane::new(parser.screen(), "agent", "project", state, true, &theme);
             let mut buf = Buffer::empty(area);
             pane.render(area, &mut buf);
             // All states should render without panic

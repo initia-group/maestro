@@ -10,13 +10,15 @@ pub mod scrollback;
 pub mod state;
 pub mod stream_json;
 
-pub use detector::{detect_state, DetectionDebounce, DetectionPatterns, DetectionSignals, ProcessExit};
+pub use detector::{
+    detect_state, DetectionDebounce, DetectionPatterns, DetectionSignals, ProcessExit,
+};
 pub use handle::{AgentHandle, RestartParams};
 pub use manager::{AgentManager, StateCounts};
 pub use restart::{RestartPolicy, RestartTracker};
 pub use scrollback::{ScrollbackBuffer, SearchMatch, SearchState};
 pub use state::{AgentState, PromptType};
-pub use stream_json::{AgentMode, StreamEvent, StreamJsonState, parse_stream_event};
+pub use stream_json::{parse_stream_event, AgentMode, StreamEvent, StreamJsonState};
 
 use uuid::Uuid;
 

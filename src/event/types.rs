@@ -17,15 +17,10 @@ pub enum AppEvent {
     Input(InputEvent),
 
     /// Raw bytes received from an agent's PTY.
-    PtyOutput {
-        agent_id: AgentId,
-        data: Vec<u8>,
-    },
+    PtyOutput { agent_id: AgentId, data: Vec<u8> },
 
     /// An agent's PTY has closed (process exited or PTY error).
-    PtyEof {
-        agent_id: AgentId,
-    },
+    PtyEof { agent_id: AgentId },
 
     /// An agent's state has changed (detected by the state detector).
     AgentStateChanged {
@@ -43,10 +38,7 @@ pub enum AppEvent {
     RenderRequest,
 
     /// Terminal window was resized.
-    Resize {
-        cols: u16,
-        rows: u16,
-    },
+    Resize { cols: u16, rows: u16 },
 
     /// Request to quit the application.
     QuitRequested,

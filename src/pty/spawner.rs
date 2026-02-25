@@ -59,16 +59,13 @@ pub fn spawn_in_pty(config: SpawnConfig) -> Result<SpawnResult> {
     }
 
     // Spawn the child in the slave PTY
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| {
-            eyre!(
-                "Failed to spawn '{}' in PTY (cwd: {}): {e}",
-                config.command,
-                config.cwd.display()
-            )
-        })?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| {
+        eyre!(
+            "Failed to spawn '{}' in PTY (cwd: {}): {e}",
+            config.command,
+            config.cwd.display()
+        )
+    })?;
 
     // Drop the slave — we only need the master end.
     // The child holds the slave fd via the spawned process.

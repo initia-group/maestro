@@ -23,8 +23,8 @@ use crate::ui::layout::{
     pane_to_pty_size, spawn_picker_area, ActiveLayout, MIN_COLS, MIN_ROWS,
 };
 use crate::ui::pane_manager::PaneManager;
-use crate::ui::spawn_picker::SpawnPicker;
 use crate::ui::sidebar::{ProjectAgents, Sidebar, SidebarState};
+use crate::ui::spawn_picker::SpawnPicker;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::terminal_pane::{
     cursor_position, extract_selected_text, EmptyPane, TerminalPane, TextSelection,
@@ -103,10 +103,7 @@ impl App {
     ///
     /// `event_tx` is an unbounded sender used by PTY controllers to send
     /// output events. The App bridges this to the bounded EventBus.
-    pub fn new(
-        config: MaestroConfig,
-        event_tx: mpsc::UnboundedSender<AppEvent>,
-    ) -> Self {
+    pub fn new(config: MaestroConfig, event_tx: mpsc::UnboundedSender<AppEvent>) -> Self {
         let theme = Theme::from_name(&config.ui.theme.name);
         let initial_layout = match config.ui.default_layout {
             crate::config::settings::LayoutMode::Single => ActiveLayout::Single,
@@ -118,10 +115,8 @@ impl App {
         let palette_commands = build_command_registry(&config.template);
         let palette_matcher = PaletteMatcher::new();
         let palette_suggestions = palette_matcher.match_commands("", &palette_commands);
-        let profile_manager = ProfileManager::new(
-            config.profile.clone(),
-            config.active_profile.clone(),
-        );
+        let profile_manager =
+            ProfileManager::new(config.profile.clone(), config.active_profile.clone());
 
         let data_dir = expand_tilde(std::path::Path::new("~/.local/share/maestro"));
         let session_manager = SessionManager::new(&data_dir);
@@ -226,8 +221,9 @@ impl App {
                 // In Command mode, every keystroke potentially changes fuzzy
                 // suggestions, so update them and mark the frame dirty.
                 if let InputMode::Command { ref input, .. } = self.input_handler.mode() {
-                    self.palette_suggestions =
-                        self.palette_matcher.match_commands(input, &self.palette_commands);
+                    self.palette_suggestions = self
+                        .palette_matcher
+                        .match_commands(input, &self.palette_commands);
                     self.dirty = true;
                 }
 
@@ -475,39 +471,41 @@ impl App {
                     input: String::new(),
                     selected: 0,
                 });
-                self.palette_suggestions =
-                    self.palette_matcher.match_commands("", &self.palette_commands);
+                self.palette_suggestions = self
+                    .palette_matcher
+                    .match_commands("", &self.palette_commands);
                 self.dirty = true;
             }
             Action::CloseCommandPalette => {
-                self.palette_suggestions =
-                    self.palette_matcher.match_commands("", &self.palette_commands);
+                self.palette_suggestions = self
+                    .palette_matcher
+                    .match_commands("", &self.palette_commands);
                 self.dirty = true;
             }
             Action::ExecuteCommand(ref input, selected) => {
                 // Resolve the command to execute: use the selected suggestion's
                 // keyword if available, otherwise fall back to the raw input.
-                let command = if let Some(&(cmd_idx, _score)) =
-                    self.palette_suggestions.get(selected)
-                {
-                    if let Some(cmd) = self.palette_commands.get(cmd_idx) {
-                        // If the command takes no args, use just the keyword.
-                        // If it takes args, replace the first word (typed keyword)
-                        // with the selected keyword and keep remaining args.
-                        let parts: Vec<&str> = input.split_whitespace().collect();
-                        if parts.len() > 1 {
-                            format!("{} {}", cmd.keyword, parts[1..].join(" "))
+                let command =
+                    if let Some(&(cmd_idx, _score)) = self.palette_suggestions.get(selected) {
+                        if let Some(cmd) = self.palette_commands.get(cmd_idx) {
+                            // If the command takes no args, use just the keyword.
+                            // If it takes args, replace the first word (typed keyword)
+                            // with the selected keyword and keep remaining args.
+                            let parts: Vec<&str> = input.split_whitespace().collect();
+                            if parts.len() > 1 {
+                                format!("{} {}", cmd.keyword, parts[1..].join(" "))
+                            } else {
+                                cmd.keyword.clone()
+                            }
                         } else {
-                            cmd.keyword.clone()
+                            input.clone()
                         }
                     } else {
                         input.clone()
-                    }
-                } else {
-                    input.clone()
-                };
-                self.palette_suggestions =
-                    self.palette_matcher.match_commands("", &self.palette_commands);
+                    };
+                self.palette_suggestions = self
+                    .palette_matcher
+                    .match_commands("", &self.palette_commands);
                 self.dirty = true;
                 match parse_command(&command, &self.agent_manager) {
                     Ok(inner_action) => {
@@ -689,10 +687,7 @@ impl App {
                 }
                 self.dirty = true;
             }
-            Action::CreateProject {
-                ref name,
-                ref path,
-            } => {
+            Action::CreateProject { ref name, ref path } => {
                 let project_name = name.clone();
                 let project_path = expand_tilde(std::path::Path::new(path));
 
@@ -701,13 +696,13 @@ impl App {
                 } else {
                     match self.agent_manager.add_empty_project(&project_name) {
                         Ok(()) => {
-                            self.config.project.push(
-                                crate::config::settings::ProjectConfig {
+                            self.config
+                                .project
+                                .push(crate::config::settings::ProjectConfig {
                                     name: project_name.clone(),
                                     path: project_path,
                                     agent: vec![],
-                                },
-                            );
+                                });
                             info!("Created project '{}'", project_name);
                             self.rebuild_sidebar();
                         }
@@ -746,8 +741,7 @@ impl App {
             }
             Action::Quit => {
                 let counts = self.agent_manager.state_counts();
-                let total_alive =
-                    counts.running + counts.waiting + counts.idle + counts.spawning;
+                let total_alive = counts.running + counts.waiting + counts.idle + counts.spawning;
 
                 if total_alive == 0 || self.quit_pending {
                     self.running = false;
@@ -862,9 +856,7 @@ impl App {
             }
 
             // Profile management
-            Action::SwitchProfile {
-                ref profile_name,
-            } => {
+            Action::SwitchProfile { ref profile_name } => {
                 let name = profile_name.clone();
                 self.switch_profile(&name);
                 self.dirty = true;
@@ -1041,14 +1033,17 @@ impl App {
                 "Terminal too small. Need at least {}x{}, have {}x{}.",
                 MIN_COLS, MIN_ROWS, area.width, area.height,
             );
-            let paragraph =
-                ratatui::widgets::Paragraph::new(msg).alignment(Alignment::Center);
+            let paragraph = ratatui::widgets::Paragraph::new(msg).alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
             return;
         }
 
         // Calculate layout
-        let layout = calculate_layout(area, self.config.ui.sidebar_width, self.pane_manager.layout());
+        let layout = calculate_layout(
+            area,
+            self.config.ui.sidebar_width,
+            self.pane_manager.layout(),
+        );
 
         // Render sidebar
         let sidebar = Sidebar::new(&self.theme, self.config.ui.show_uptime, self.pulse_phase);
@@ -1085,11 +1080,7 @@ impl App {
                         )
                         .with_scroll_offset(handle.scroll_offset())
                         .with_search(handle.scrollback().search())
-                        .with_selection(
-                            self.selection
-                                .as_ref()
-                                .filter(|s| s.pane_index == i),
-                        )
+                        .with_selection(self.selection.as_ref().filter(|s| s.pane_index == i))
                         .with_pulse_phase(self.pulse_phase);
                         frame.render_widget(terminal_pane, pane.area);
 
@@ -1098,9 +1089,7 @@ impl App {
                             && is_focused
                             && scroll_offset == 0
                         {
-                            if let Some((cx, cy)) =
-                                cursor_position(handle.screen(), &pane.inner)
-                            {
+                            if let Some((cx, cy)) = cursor_position(handle.screen(), &pane.inner) {
                                 frame.set_cursor_position((cx, cy));
                             }
                         }
@@ -1358,7 +1347,10 @@ impl App {
             "split-v" => ActiveLayout::SplitVertical,
             "grid" => ActiveLayout::Grid,
             other => {
-                warn!("Unknown layout '{}' in session, defaulting to single", other);
+                warn!(
+                    "Unknown layout '{}' in session, defaulting to single",
+                    other
+                );
                 ActiveLayout::Single
             }
         };
@@ -1371,14 +1363,19 @@ impl App {
             let _ = self.agent_manager.add_empty_project(&saved.project_name);
 
             // Ensure config.project is populated so path lookup works for new agents
-            if !self.config.project.iter().any(|p| p.name == saved.project_name) {
-                self.config.project.push(
-                    crate::config::settings::ProjectConfig {
+            if !self
+                .config
+                .project
+                .iter()
+                .any(|p| p.name == saved.project_name)
+            {
+                self.config
+                    .project
+                    .push(crate::config::settings::ProjectConfig {
                         name: saved.project_name.clone(),
                         path: saved.cwd.clone(),
                         agent: vec![],
-                    },
-                );
+                    });
             }
 
             // Resume the previous Claude Code conversation if this is a claude command.
@@ -1492,10 +1489,7 @@ impl App {
                 let mut agent_flat_idx = 0;
                 let mut found = false;
                 for (i, item) in self.sidebar_state.items().iter().enumerate() {
-                    if matches!(
-                        item,
-                        crate::ui::sidebar::SidebarItem::Agent { .. }
-                    ) {
+                    if matches!(item, crate::ui::sidebar::SidebarItem::Agent { .. }) {
                         if i == selected_idx {
                             found = true;
                             break;
@@ -1583,7 +1577,11 @@ impl App {
     }
 
     fn calculate_default_pty_size(&self, area: Rect) -> portable_pty::PtySize {
-        let layout = calculate_layout(area, self.config.ui.sidebar_width, self.pane_manager.layout());
+        let layout = calculate_layout(
+            area,
+            self.config.ui.sidebar_width,
+            self.pane_manager.layout(),
+        );
         layout
             .panes
             .first()
@@ -1597,7 +1595,11 @@ impl App {
     }
 
     fn resize_visible_agents(&mut self, area: Rect) {
-        let layout = calculate_layout(area, self.config.ui.sidebar_width, self.pane_manager.layout());
+        let layout = calculate_layout(
+            area,
+            self.config.ui.sidebar_width,
+            self.pane_manager.layout(),
+        );
         for (i, pane) in layout.panes.iter().enumerate() {
             if let Some(id) = self.get_pane_agent_id(i) {
                 let size = pane_to_pty_size(&pane.inner);
@@ -1703,8 +1705,7 @@ impl App {
             } else {
                 (
                     sel_name.clone(),
-                    std::env::current_dir()
-                        .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
                 )
             }
         } else if let Some(proj) = self.config.project.first() {
@@ -1718,11 +1719,7 @@ impl App {
 
         // Determine command, args, and name prefix based on SpawnKind
         let (command, args, name_prefix) = match kind {
-            SpawnKind::Claude => (
-                self.config.global.claude_binary.clone(),
-                vec![],
-                "claude",
-            ),
+            SpawnKind::Claude => (self.config.global.claude_binary.clone(), vec![], "claude"),
             SpawnKind::ClaudeYolo => (
                 self.config.global.claude_binary.clone(),
                 vec!["--dangerously-skip-permissions".to_string()],
@@ -1736,11 +1733,7 @@ impl App {
                 ],
                 "claudeyolo-w",
             ),
-            SpawnKind::Terminal => (
-                self.config.global.default_shell.clone(),
-                vec![],
-                "term",
-            ),
+            SpawnKind::Terminal => (self.config.global.default_shell.clone(), vec![], "term"),
         };
 
         // Auto-generate unique name
@@ -1778,7 +1771,11 @@ impl App {
 
     /// Spawn an agent from a named template.
     fn spawn_from_template(&mut self, template_name: &str, agent_name: &str, project_name: &str) {
-        let template = self.config.template.iter().find(|t| t.name == template_name);
+        let template = self
+            .config
+            .template
+            .iter()
+            .find(|t| t.name == template_name);
         match template {
             Some(t) => {
                 let pty_size = self.calculate_default_pty_size(self.last_area);
@@ -1787,7 +1784,9 @@ impl App {
                     project_name.to_string(),
                     t.command.clone(),
                     t.args.clone(),
-                    t.cwd.clone().unwrap_or_else(|| std::path::PathBuf::from(".")),
+                    t.cwd
+                        .clone()
+                        .unwrap_or_else(|| std::path::PathBuf::from(".")),
                     t.env.clone(),
                     pty_size,
                 ) {
@@ -1834,12 +1833,9 @@ impl App {
 
         if let InputMode::Rename { ref input, .. } = self.input_handler.mode() {
             let display = format!(" > {}\u{2588}", input);
-            frame.buffer_mut().set_string(
-                inner.x,
-                inner.y,
-                &display,
-                self.theme.palette_input,
-            );
+            frame
+                .buffer_mut()
+                .set_string(inner.x, inner.y, &display, self.theme.palette_input);
         }
     }
 
@@ -1873,12 +1869,9 @@ impl App {
 
         if let InputMode::RenameProject { ref input, .. } = self.input_handler.mode() {
             let display = format!(" > {}\u{2588}", input);
-            frame.buffer_mut().set_string(
-                inner.x,
-                inner.y,
-                &display,
-                self.theme.palette_input,
-            );
+            frame
+                .buffer_mut()
+                .set_string(inner.x, inner.y, &display, self.theme.palette_input);
         }
     }
 
@@ -1927,21 +1920,30 @@ impl App {
             } else {
                 self.theme.palette_description
             };
-            frame.buffer_mut().set_string(inner.x, y, &name_label, name_style);
+            frame
+                .buffer_mut()
+                .set_string(inner.x, y, &name_label, name_style);
             y += 1;
 
             // Only show path if we're on the Path step
             if *step == NewProjectStep::Path {
                 if y < inner.y + inner.height {
                     let path_label = format!("  Path: {}\u{2588}", path_input);
-                    frame.buffer_mut().set_string(inner.x, y, &path_label, self.theme.palette_input);
+                    frame.buffer_mut().set_string(
+                        inner.x,
+                        y,
+                        &path_label,
+                        self.theme.palette_input,
+                    );
                     y += 1;
                 }
 
                 // Separator
                 if y < inner.y + inner.height {
                     let sep = "\u{2500}".repeat(inner.width as usize);
-                    frame.buffer_mut().set_string(inner.x, y, &sep, self.theme.palette_border);
+                    frame
+                        .buffer_mut()
+                        .set_string(inner.x, y, &sep, self.theme.palette_border);
                     y += 1;
                 }
 
@@ -1993,10 +1995,7 @@ fn compute_dir_completions(partial: &str) -> Vec<String> {
         (expanded.as_path(), "")
     } else {
         let parent = expanded.parent().unwrap_or(expanded.as_path());
-        let prefix = expanded
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("");
+        let prefix = expanded.file_name().and_then(|f| f.to_str()).unwrap_or("");
         (parent, prefix)
     };
 
@@ -2007,9 +2006,7 @@ fn compute_dir_completions(partial: &str) -> Vec<String> {
 
     let mut results: Vec<String> = entries
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().map(|ft| ft.is_dir()).unwrap_or(false)
-        })
+        .filter(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
         .filter(|e| {
             let name = e.file_name();
             let name_str = name.to_string_lossy();

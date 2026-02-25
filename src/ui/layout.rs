@@ -92,7 +92,7 @@ pub fn calculate_layout(area: Rect, sidebar_width: u16, layout: &ActiveLayout) -
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),   // sidebar + panes
+            Constraint::Min(3),    // sidebar + panes
             Constraint::Length(1), // status bar (single row)
         ])
         .split(area);

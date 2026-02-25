@@ -193,9 +193,7 @@ impl Theme {
             palette_fg: Color::White,
             palette_border: Style::default().fg(Color::Cyan),
             palette_input: Style::default().fg(Color::White),
-            palette_selected: Style::default()
-                .fg(Color::White)
-                .bg(Color::Rgb(60, 60, 90)),
+            palette_selected: Style::default().fg(Color::White).bg(Color::Rgb(60, 60, 90)),
             palette_description: Style::default().fg(Color::DarkGray),
 
             // Help overlay
@@ -326,13 +324,9 @@ impl Theme {
             sidebar_fg: fg,
             sidebar_selected_bg: Color::Rgb(80, 73, 69),
             sidebar_selected_fg: fg,
-            sidebar_project_header: Style::default()
-                .fg(aqua)
-                .add_modifier(Modifier::BOLD),
+            sidebar_project_header: Style::default().fg(aqua).add_modifier(Modifier::BOLD),
             sidebar_agent_name: Style::default().fg(fg),
-            sidebar_agent_name_selected: Style::default()
-                .fg(fg)
-                .add_modifier(Modifier::BOLD),
+            sidebar_agent_name_selected: Style::default().fg(fg).add_modifier(Modifier::BOLD),
             sidebar_uptime: Style::default().fg(gray),
             sidebar_border: Style::default().fg(dark_gray),
             sidebar_row_bg_running: Some(Color::Rgb(38, 50, 33)),
@@ -345,22 +339,14 @@ impl Theme {
             status_symbol_bg_errored: Some(Color::Rgb(140, 30, 25)),
 
             terminal_border: Style::default().fg(dark_gray),
-            terminal_title: Style::default()
-                .fg(fg)
-                .add_modifier(Modifier::BOLD),
+            terminal_title: Style::default().fg(fg).add_modifier(Modifier::BOLD),
             terminal_title_status_indicator: Style::default(),
 
             status_bar_bg: Color::Rgb(60, 56, 54),
             status_bar_fg: fg,
-            status_bar_mode_normal: Style::default()
-                .fg(blue)
-                .add_modifier(Modifier::BOLD),
-            status_bar_mode_insert: Style::default()
-                .fg(green)
-                .add_modifier(Modifier::BOLD),
-            status_bar_mode_command: Style::default()
-                .fg(orange)
-                .add_modifier(Modifier::BOLD),
+            status_bar_mode_normal: Style::default().fg(blue).add_modifier(Modifier::BOLD),
+            status_bar_mode_insert: Style::default().fg(green).add_modifier(Modifier::BOLD),
+            status_bar_mode_command: Style::default().fg(orange).add_modifier(Modifier::BOLD),
             status_bar_keybinding_hint: Style::default().fg(gray),
 
             palette_bg: Color::Rgb(50, 48, 47),
@@ -372,9 +358,7 @@ impl Theme {
 
             help_overlay_bg: bg,
             help_overlay_fg: fg,
-            help_key: Style::default()
-                .fg(aqua)
-                .add_modifier(Modifier::BOLD),
+            help_key: Style::default().fg(aqua).add_modifier(Modifier::BOLD),
             help_description: Style::default().fg(gray),
 
             // Pulse animation
@@ -441,7 +425,11 @@ impl Theme {
 
     /// Compute the interpolated pulse color for the waiting row background.
     pub fn pulse_waiting_row_color(&self, phase: u8) -> Color {
-        lerp_color(self.pulse_waiting_row_dim, self.pulse_waiting_row_bright, phase)
+        lerp_color(
+            self.pulse_waiting_row_dim,
+            self.pulse_waiting_row_bright,
+            phase,
+        )
     }
 
     /// Compute the interpolated pulse color for the AskUserQuestion symbol background.

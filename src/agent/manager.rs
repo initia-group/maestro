@@ -68,7 +68,11 @@ impl AgentManager {
         pty_size: PtySize,
     ) -> Result<AgentId> {
         // Check agent limit
-        let alive_count = self.agents.values().filter(|a| a.state().is_alive()).count();
+        let alive_count = self
+            .agents
+            .values()
+            .filter(|a| a.state().is_alive())
+            .count();
         if alive_count >= self.max_agents {
             bail!(
                 "Agent limit reached ({}/{}). Kill an agent first.",
@@ -240,11 +244,7 @@ impl AgentManager {
     /// Strips `--resume`/`-r` and its session-id value from the args,
     /// removes the errored agent, and spawns a new one. The new agent
     /// has `resume_retry_attempted` set to prevent further retries.
-    pub fn retry_without_resume(
-        &mut self,
-        id: AgentId,
-        pty_size: PtySize,
-    ) -> Result<AgentId> {
+    pub fn retry_without_resume(&mut self, id: AgentId, pty_size: PtySize) -> Result<AgentId> {
         let params = match self.agents.get(&id) {
             Some(handle) => handle.restart_params(),
             None => bail!("Agent {} not found", id),
@@ -285,7 +285,10 @@ impl AgentManager {
             handle.set_resume_retry_attempted(true);
         }
 
-        info!("Retried stale session agent {} -> {} (fresh session)", id, new_id);
+        info!(
+            "Retried stale session agent {} -> {} (fresh session)",
+            id, new_id
+        );
         Ok(new_id)
     }
 
@@ -306,9 +309,10 @@ impl AgentManager {
         };
 
         // Check for duplicate name within the same project (excluding self)
-        let duplicate = self.agents.values().any(|a| {
-            a.id() != id && a.project_name() == project_name && a.name() == new_name
-        });
+        let duplicate = self
+            .agents
+            .values()
+            .any(|a| a.id() != id && a.project_name() == project_name && a.name() == new_name);
         if duplicate {
             bail!(
                 "Agent '{}' already exists in project '{}'",
@@ -340,19 +344,13 @@ impl AgentManager {
         }
 
         // Check that the old project exists
-        let project_exists = self
-            .display_order
-            .iter()
-            .any(|(name, _)| name == old_name);
+        let project_exists = self.display_order.iter().any(|(name, _)| name == old_name);
         if !project_exists {
             bail!("Project '{}' not found", old_name);
         }
 
         // Check that the new name doesn't conflict
-        let name_taken = self
-            .display_order
-            .iter()
-            .any(|(name, _)| name == new_name);
+        let name_taken = self.display_order.iter().any(|(name, _)| name == new_name);
         if name_taken {
             bail!("Project '{}' already exists", new_name);
         }
@@ -509,8 +507,7 @@ impl AgentManager {
         {
             bail!("Project '{}' already exists", project_name);
         }
-        self.display_order
-            .push((project_name.to_string(), vec![]));
+        self.display_order.push((project_name.to_string(), vec![]));
         Ok(())
     }
 

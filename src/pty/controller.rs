@@ -89,9 +89,7 @@ impl PtyController {
                             .is_err()
                         {
                             // Event bus is gone — app is shutting down
-                            debug!(
-                                "Event bus closed, PTY reader exiting for agent {agent_id}"
-                            );
+                            debug!("Event bus closed, PTY reader exiting for agent {agent_id}");
                             break;
                         }
                     }
@@ -112,11 +110,9 @@ impl PtyController {
     /// This is synchronous and fast — just writes to a pipe.
     pub fn write(&self, data: &[u8]) -> Result<()> {
         let mut writer = self.writer.lock().unwrap();
-        writer
-            .write_all(data)
-            .map_err(|e| {
-                color_eyre::eyre::eyre!("PTY write error for agent {}: {e}", self.agent_id)
-            })?;
+        writer.write_all(data).map_err(|e| {
+            color_eyre::eyre::eyre!("PTY write error for agent {}: {e}", self.agent_id)
+        })?;
         writer.flush().map_err(|e| {
             color_eyre::eyre::eyre!("PTY flush error for agent {}: {e}", self.agent_id)
         })?;

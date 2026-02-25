@@ -5,7 +5,7 @@
 //! debounce state, and metadata needed for restart.
 
 use crate::agent::detector::{
-    extract_screen_lines, detect_state, DetectionDebounce, DetectionPatterns, DetectionSignals,
+    detect_state, extract_screen_lines, DetectionDebounce, DetectionPatterns, DetectionSignals,
     ProcessExit,
 };
 use crate::agent::scrollback::ScrollbackBuffer;

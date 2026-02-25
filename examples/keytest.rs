@@ -22,9 +22,7 @@ fn main() -> io::Result<()> {
                 );
                 io::stdout().flush()?;
 
-                if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
+                if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     break;
                 }
             }

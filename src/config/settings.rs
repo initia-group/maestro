@@ -33,7 +33,6 @@ pub struct MaestroConfig {
     pub session: SessionConfig,
 }
 
-
 impl MaestroConfig {
     /// Reload config from disk and return a fresh instance.
     /// Does NOT apply changes — caller decides what to update.

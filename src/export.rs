@@ -53,11 +53,7 @@ impl OutputExporter {
     ) -> Result<PathBuf> {
         let duration = Utc::now() - started_at;
         let duration_str = if duration.num_hours() > 0 {
-            format!(
-                "{}h {}m",
-                duration.num_hours(),
-                duration.num_minutes() % 60
-            )
+            format!("{}h {}m", duration.num_hours(), duration.num_minutes() % 60)
         } else {
             format!("{}m", duration.num_minutes())
         };

@@ -170,7 +170,10 @@ pub fn detect_state(patterns: &DetectionPatterns, signals: &DetectionSignals) ->
     if let Some(tool_name) = detect_tool_approval(patterns, bottom_lines) {
         // Hysteresis: avoid resetting `since` timestamp if already in same state
         if let AgentState::WaitingForInput {
-            prompt_type: PromptType::ToolApproval { tool_name: existing },
+            prompt_type:
+                PromptType::ToolApproval {
+                    tool_name: existing,
+                },
             ..
         } = signals.current_state
         {
@@ -907,10 +910,7 @@ mod tests {
     fn test_ask_user_question_too_few_options() {
         let patterns = default_patterns();
         // Only 1 option line — not enough for AskUserQuestion
-        let lines = vec![
-            "Some question?".into(),
-            "  1. Only option".into(),
-        ];
+        let lines = vec!["Some question?".into(), "  1. Only option".into()];
         let result = detect_ask_user_question(&patterns, &lines);
         assert!(result.is_none());
     }

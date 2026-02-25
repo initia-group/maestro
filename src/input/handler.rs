@@ -181,19 +181,21 @@ impl InputHandler {
 
             // Enter executes the selected command
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (input, selected) =
-                    if let InputMode::Command { ref input, selected } = self.mode {
-                        (input.clone(), selected)
-                    } else {
-                        (String::new(), 0)
-                    };
+                let (input, selected) = if let InputMode::Command {
+                    ref input,
+                    selected,
+                } = self.mode
+                {
+                    (input.clone(), selected)
+                } else {
+                    (String::new(), 0)
+                };
                 self.mode = InputMode::Normal;
                 Action::ExecuteCommand(input, selected)
             }
 
             // Navigation within suggestions
-            (KeyModifiers::NONE, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
+            (KeyModifiers::NONE, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
                 if let InputMode::Command {
                     ref mut selected, ..
                 } = self.mode
@@ -202,8 +204,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            (KeyModifiers::NONE, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 if let InputMode::Command {
                     ref mut selected, ..
                 } = self.mode
@@ -228,8 +229,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Command {
                     ref mut input,
                     ref mut selected,
@@ -335,12 +335,15 @@ impl InputHandler {
 
             // Enter confirms rename
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (agent_id, new_name) =
-                    if let InputMode::Rename { agent_id, ref input } = self.mode {
-                        (agent_id, input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (agent_id, new_name) = if let InputMode::Rename {
+                    agent_id,
+                    ref input,
+                } = self.mode
+                {
+                    (agent_id, input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::ConfirmRename { agent_id, new_name }
             }
@@ -362,8 +365,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Rename { ref mut input, .. } = self.mode {
                     input.push(c);
                 }
@@ -386,12 +388,15 @@ impl InputHandler {
 
             // Enter confirms rename
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (old_name, new_name) =
-                    if let InputMode::RenameProject { ref old_name, ref input } = self.mode {
-                        (old_name.clone(), input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (old_name, new_name) = if let InputMode::RenameProject {
+                    ref old_name,
+                    ref input,
+                } = self.mode
+                {
+                    (old_name.clone(), input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::ConfirmRenameProject { old_name, new_name }
             }
@@ -413,8 +418,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::RenameProject { ref mut input, .. } = self.mode {
                     input.push(c);
                 }
@@ -521,8 +525,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Search { ref mut query } = self.mode {
                     query.push(c);
                 }
@@ -556,12 +559,11 @@ impl InputHandler {
                 Action::None
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let name_empty =
-                    if let InputMode::NewProject { ref name, .. } = self.mode {
-                        name.is_empty()
-                    } else {
-                        true
-                    };
+                let name_empty = if let InputMode::NewProject { ref name, .. } = self.mode {
+                    name.is_empty()
+                } else {
+                    true
+                };
                 if name_empty {
                     Action::None
                 } else {
@@ -574,8 +576,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::NewProject { ref mut name, .. } = self.mode {
                     name.push(c);
                 }
@@ -592,17 +593,16 @@ impl InputHandler {
                 Action::None
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (name, path) =
-                    if let InputMode::NewProject {
-                        ref name,
-                        ref path_input,
-                        ..
-                    } = self.mode
-                    {
-                        (name.clone(), path_input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (name, path) = if let InputMode::NewProject {
+                    ref name,
+                    ref path_input,
+                    ..
+                } = self.mode
+                {
+                    (name.clone(), path_input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::CreateProject { name, path }
             }
@@ -619,8 +619,7 @@ impl InputHandler {
                 }
                 Action::NewProjectPathChanged
             }
-            (KeyModifiers::NONE, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
+            (KeyModifiers::NONE, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
                 if let InputMode::NewProject {
                     ref completions,
                     ref mut selected_completion,
@@ -628,14 +627,12 @@ impl InputHandler {
                 } = self.mode
                 {
                     if !completions.is_empty() {
-                        *selected_completion =
-                            (*selected_completion + 1) % completions.len();
+                        *selected_completion = (*selected_completion + 1) % completions.len();
                     }
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            (KeyModifiers::NONE, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 if let InputMode::NewProject {
                     ref completions,
                     ref mut selected_completion,
@@ -652,8 +649,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::NewProject {
                     ref mut path_input,
                     ref mut selected_completion,
@@ -672,10 +668,7 @@ impl InputHandler {
 
 /// Check if a position is within a rectangle.
 fn is_in_rect(col: u16, row: u16, rect: &Rect) -> bool {
-    col >= rect.x
-        && col < rect.x + rect.width
-        && row >= rect.y
-        && row < rect.y + rect.height
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
 /// Check if a position is over any terminal pane.
@@ -1683,7 +1676,8 @@ mod tests {
         handler.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         if let InputMode::NewProject {
-            selected_completion, ..
+            selected_completion,
+            ..
         } = handler.mode()
         {
             assert_eq!(*selected_completion, 1);
@@ -1701,7 +1695,8 @@ mod tests {
         handler.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
         if let InputMode::NewProject {
-            selected_completion, ..
+            selected_completion,
+            ..
         } = handler.mode()
         {
             assert_eq!(*selected_completion, 1);

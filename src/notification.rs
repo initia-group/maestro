@@ -175,9 +175,7 @@ mod tests {
         };
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Errored {
             at: Utc::now(),
             error_hint: Some("boom".into()),
@@ -191,12 +189,8 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
-        let new = AgentState::Idle {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
+        let new = AgentState::Idle { since: Utc::now() };
         manager.on_state_change(id, "agent", "project", &old, &new);
         assert!(manager.last_notified.is_empty());
     }
@@ -210,9 +204,7 @@ mod tests {
             since: Utc::now(),
             prompt_type: PromptType::Question,
         };
-        let new = AgentState::Running {
-            since: Utc::now(),
-        };
+        let new = AgentState::Running { since: Utc::now() };
         manager.on_state_change(id, "agent", "project", &old, &new);
         assert!(manager.last_notified.is_empty());
     }
@@ -222,12 +214,8 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Spawning {
-            since: Utc::now(),
-        };
-        let new = AgentState::Spawning {
-            since: Utc::now(),
-        };
+        let old = AgentState::Spawning { since: Utc::now() };
+        let new = AgentState::Spawning { since: Utc::now() };
         manager.on_state_change(id, "agent", "project", &old, &new);
         assert!(manager.last_notified.is_empty());
     }
@@ -237,9 +225,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::WaitingForInput {
             since: Utc::now(),
             prompt_type: PromptType::ToolApproval {
@@ -256,9 +242,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::WaitingForInput {
             since: Utc::now(),
             prompt_type: PromptType::Question,
@@ -272,9 +256,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Completed {
             at: Utc::now(),
             exit_code: Some(0),
@@ -288,9 +270,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Errored {
             at: Utc::now(),
             error_hint: Some("API connection failed".into()),
@@ -304,9 +284,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::WaitingForInput {
             since: Utc::now(),
             prompt_type: PromptType::Unknown,
@@ -320,9 +298,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::WaitingForInput {
             since: Utc::now(),
             prompt_type: PromptType::InputPrompt,
@@ -339,9 +315,7 @@ mod tests {
         };
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::WaitingForInput {
             since: Utc::now(),
             prompt_type: PromptType::InputPrompt,
@@ -358,9 +332,7 @@ mod tests {
         };
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Errored {
             at: Utc::now(),
             error_hint: Some("error".into()),
@@ -390,9 +362,7 @@ mod tests {
         let mut manager = NotificationManager::new(&config);
         let id1 = make_agent_id();
         let id2 = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Errored {
             at: Utc::now(),
             error_hint: Some("error".into()),
@@ -409,9 +379,7 @@ mod tests {
         let config = default_config();
         let mut manager = NotificationManager::new(&config);
         let id = make_agent_id();
-        let old = AgentState::Running {
-            since: Utc::now(),
-        };
+        let old = AgentState::Running { since: Utc::now() };
         let new = AgentState::Errored {
             at: Utc::now(),
             error_hint: None,
