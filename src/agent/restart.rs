@@ -72,8 +72,11 @@ impl RestartTracker {
     /// The delay is capped at 300 seconds (5 minutes).
     pub fn next_delay(&self) -> Duration {
         let base = self.policy.restart_delay_secs as f64;
-        let multiplied =
-            base * self.policy.restart_backoff_multiplier.powi(self.restart_count as i32);
+        let multiplied = base
+            * self
+                .policy
+                .restart_backoff_multiplier
+                .powi(self.restart_count as i32);
         Duration::from_secs_f64(multiplied.min(300.0))
     }
 

@@ -302,9 +302,7 @@ impl<'a> Widget for CommandPalette<'a> {
 
         // Suggestions
         let max_suggestions = (inner.height as usize).saturating_sub(2);
-        for (i, &(cmd_idx, _score)) in
-            self.suggestions.iter().take(max_suggestions).enumerate()
-        {
+        for (i, &(cmd_idx, _score)) in self.suggestions.iter().take(max_suggestions).enumerate() {
             let y = inner.y + 2 + i as u16;
             let cmd = &self.commands[cmd_idx];
             let is_selected = i == self.selected;
@@ -508,15 +506,9 @@ mod tests {
         let commands = make_test_commands();
         let results = matcher.match_commands("sp", &commands);
         // "spawn" and "split" should match, "quit" should not
-        assert!(results
-            .iter()
-            .any(|(i, _)| commands[*i].keyword == "spawn"));
-        assert!(results
-            .iter()
-            .any(|(i, _)| commands[*i].keyword == "split"));
-        assert!(!results
-            .iter()
-            .any(|(i, _)| commands[*i].keyword == "quit"));
+        assert!(results.iter().any(|(i, _)| commands[*i].keyword == "spawn"));
+        assert!(results.iter().any(|(i, _)| commands[*i].keyword == "split"));
+        assert!(!results.iter().any(|(i, _)| commands[*i].keyword == "quit"));
     }
 
     #[test]
@@ -615,12 +607,8 @@ mod tests {
         assert_eq!(commands.len(), 15);
 
         // Template commands should be present
-        assert!(commands
-            .iter()
-            .any(|c| c.keyword == "spawn code-review"));
-        assert!(commands
-            .iter()
-            .any(|c| c.keyword == "spawn test-runner"));
+        assert!(commands.iter().any(|c| c.keyword == "spawn code-review"));
+        assert!(commands.iter().any(|c| c.keyword == "spawn test-runner"));
     }
 
     #[test]
@@ -753,10 +741,7 @@ mod tests {
             parse_command("split single", &manager),
             Ok(Action::CloseSplit)
         );
-        assert_eq!(
-            parse_command("split s", &manager),
-            Ok(Action::CloseSplit)
-        );
+        assert_eq!(parse_command("split s", &manager), Ok(Action::CloseSplit));
     }
 
     #[test]

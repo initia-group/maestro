@@ -5,7 +5,7 @@
 //! debounce state, and metadata needed for restart.
 
 use crate::agent::detector::{
-    extract_screen_lines, detect_state, DetectionDebounce, DetectionPatterns, DetectionSignals,
+    detect_state, extract_screen_lines, DetectionDebounce, DetectionPatterns, DetectionSignals,
     ProcessExit,
 };
 use crate::agent::scrollback::ScrollbackBuffer;
@@ -70,6 +70,14 @@ pub struct AgentHandle {
 
     /// Claude Code session ID for resuming specific conversations.
     session_id: Option<String>,
+
+    /// Whether this agent is a retry after a stale `--resume` failure.
+    /// Prevents further automatic retry on quick exit.
+    resume_retry_attempted: bool,
+
+    /// Whether this agent completed/errored and the user hasn't viewed it yet.
+    /// Set to `true` on transition to a terminal state; cleared when selected.
+    has_unread_result: bool,
 }
 
 impl AgentHandle {
@@ -106,6 +114,8 @@ impl AgentHandle {
             spawn_env,
             scrollback: ScrollbackBuffer::new(10 * 1024 * 1024), // 10MB default
             session_id,
+            resume_retry_attempted: false,
+            has_unread_result: false,
         }
     }
 
@@ -136,6 +146,42 @@ impl AgentHandle {
 
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
+    }
+
+    pub fn resume_retry_attempted(&self) -> bool {
+        self.resume_retry_attempted
+    }
+
+    pub fn set_resume_retry_attempted(&mut self, val: bool) {
+        self.resume_retry_attempted = val;
+    }
+
+    /// Whether this agent has an unread completion/error result.
+    pub fn has_unread_result(&self) -> bool {
+        self.has_unread_result
+    }
+
+    /// Mark the agent's result as read (user has viewed it).
+    pub fn mark_result_read(&mut self) {
+        self.has_unread_result = false;
+    }
+
+    /// Whether this agent's error looks like a stale Claude session resume failure.
+    ///
+    /// Returns `true` if the agent errored out within `max_secs` of spawning
+    /// and was attempting a `--resume`, suggesting the session ID is stale.
+    pub fn is_stale_resume_failure(&self, max_secs: u64) -> bool {
+        if self.resume_retry_attempted {
+            return false;
+        }
+        if !matches!(self.state, AgentState::Errored { .. }) {
+            return false;
+        }
+        let age = (Utc::now() - self.spawned_at).num_seconds();
+        if age > max_secs as i64 {
+            return false;
+        }
+        self.spawn_args.iter().any(|a| a == "--resume" || a == "-r")
     }
 
     pub fn state(&self) -> &AgentState {
@@ -219,10 +265,22 @@ impl AgentHandle {
     /// Scroll up by half a page.
     pub fn scroll_up(&mut self, page_height: usize) {
         self.scrollback.scroll_up(page_height);
-        // Clamp to available scrollback
+        // Discover actual max scrollback: set_scrollback(usize::MAX) clamps
+        // to the real scrollback length, then we read it back and reset.
+        self.parser.screen_mut().set_scrollback(usize::MAX);
         let max_scrollback = self.parser.screen().scrollback();
+        self.parser.screen_mut().set_scrollback(0);
         self.scrollback.clamp_scroll(max_scrollback);
         self.dirty = true;
+    }
+
+    /// Set the vt100 scrollback viewing offset.
+    ///
+    /// Shifts which rows `screen.cell()` returns so that tui-term's
+    /// `PseudoTerminal` renders scrollback content directly.
+    /// Call with `0` to reset to live view after rendering.
+    pub fn set_scrollback_view(&mut self, offset: usize) {
+        self.parser.screen_mut().set_scrollback(offset);
     }
 
     /// Scroll down by half a page.
@@ -325,6 +383,9 @@ impl AgentHandle {
         if let Some(new_state) = self.debounce.process(detected, &self.state) {
             let _old_state = std::mem::replace(&mut self.state, new_state.clone());
             self.dirty = true;
+            if new_state.is_terminal() {
+                self.has_unread_result = true;
+            }
             Some(new_state)
         } else {
             None

@@ -49,6 +49,22 @@ impl InputHandler {
 
     /// Process a key event and return the corresponding action.
     pub fn handle_key(&mut self, key: KeyEvent) -> Action {
+        // Copy selection to clipboard.
+        // macOS: Command key is NOT forwarded by terminal emulators, so we use
+        // Alt+C (Option key is forwarded as Alt) as the macOS-friendly shortcut.
+        // Linux: Ctrl+Shift+C is the standard terminal copy shortcut.
+        // Both work on both platforms via crossterm.
+        // Ctrl+C without Shift must NOT be intercepted — it sends interrupt (0x03) to PTY.
+        if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Char('c') {
+            return Action::CopySelection;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+            && key.code == KeyCode::Char('C')
+        {
+            return Action::CopySelection;
+        }
+
         match &self.mode {
             InputMode::Normal => self.handle_normal_mode(key),
             InputMode::Insert { .. } => self.handle_insert_mode(key),
@@ -75,6 +91,9 @@ impl InputHandler {
 
             (KeyModifiers::SHIFT, KeyCode::Char('J')) => Action::NextProject,
             (KeyModifiers::SHIFT, KeyCode::Char('K')) => Action::PrevProject,
+
+            (KeyModifiers::ALT, KeyCode::Char('j')) => Action::MoveAgentDown,
+            (KeyModifiers::ALT, KeyCode::Char('k')) => Action::MoveAgentUp,
 
             // ── Jump to agent by number ──
             (KeyModifiers::NONE, KeyCode::Char(c)) if ('1'..='9').contains(&c) => {
@@ -162,19 +181,21 @@ impl InputHandler {
 
             // Enter executes the selected command
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (input, selected) =
-                    if let InputMode::Command { ref input, selected } = self.mode {
-                        (input.clone(), selected)
-                    } else {
-                        (String::new(), 0)
-                    };
+                let (input, selected) = if let InputMode::Command {
+                    ref input,
+                    selected,
+                } = self.mode
+                {
+                    (input.clone(), selected)
+                } else {
+                    (String::new(), 0)
+                };
                 self.mode = InputMode::Normal;
                 Action::ExecuteCommand(input, selected)
             }
 
             // Navigation within suggestions
-            (KeyModifiers::NONE, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
+            (KeyModifiers::NONE, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
                 if let InputMode::Command {
                     ref mut selected, ..
                 } = self.mode
@@ -183,8 +204,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            (KeyModifiers::NONE, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 if let InputMode::Command {
                     ref mut selected, ..
                 } = self.mode
@@ -209,8 +229,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Command {
                     ref mut input,
                     ref mut selected,
@@ -239,6 +258,21 @@ impl InputHandler {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_left_click(mouse.column, mouse.row, layout)
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                // Update selection endpoint during drag
+                for pane in &layout.panes {
+                    if is_in_rect(mouse.column, mouse.row, &pane.inner) {
+                        let rel_row = mouse.row.saturating_sub(pane.inner.y);
+                        let rel_col = mouse.column.saturating_sub(pane.inner.x);
+                        return Action::UpdateSelection {
+                            row: rel_row,
+                            col: rel_col,
+                        };
+                    }
+                }
+                Action::None
+            }
+            MouseEventKind::Up(MouseButton::Left) => Action::FinalizeSelection,
             MouseEventKind::ScrollUp => {
                 if is_over_pane(mouse.column, mouse.row, layout) {
                     Action::ScrollUp
@@ -266,7 +300,20 @@ impl InputHandler {
             };
         }
 
-        // Check if click is in a terminal pane
+        // Check if click is in a terminal pane's inner area (start selection)
+        for (i, pane) in layout.panes.iter().enumerate() {
+            if is_in_rect(col, row, &pane.inner) {
+                let rel_row = row.saturating_sub(pane.inner.y);
+                let rel_col = col.saturating_sub(pane.inner.x);
+                return Action::StartSelection {
+                    pane_index: i,
+                    row: rel_row,
+                    col: rel_col,
+                };
+            }
+        }
+
+        // Check if click is in a terminal pane's border area (focus pane)
         for (i, pane) in layout.panes.iter().enumerate() {
             if is_in_rect(col, row, &pane.area) {
                 return Action::PaneFocusClick { pane_index: i };
@@ -288,12 +335,15 @@ impl InputHandler {
 
             // Enter confirms rename
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (agent_id, new_name) =
-                    if let InputMode::Rename { agent_id, ref input } = self.mode {
-                        (agent_id, input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (agent_id, new_name) = if let InputMode::Rename {
+                    agent_id,
+                    ref input,
+                } = self.mode
+                {
+                    (agent_id, input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::ConfirmRename { agent_id, new_name }
             }
@@ -315,8 +365,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Rename { ref mut input, .. } = self.mode {
                     input.push(c);
                 }
@@ -339,12 +388,15 @@ impl InputHandler {
 
             // Enter confirms rename
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (old_name, new_name) =
-                    if let InputMode::RenameProject { ref old_name, ref input } = self.mode {
-                        (old_name.clone(), input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (old_name, new_name) = if let InputMode::RenameProject {
+                    ref old_name,
+                    ref input,
+                } = self.mode
+                {
+                    (old_name.clone(), input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::ConfirmRenameProject { old_name, new_name }
             }
@@ -366,8 +418,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::RenameProject { ref mut input, .. } = self.mode {
                     input.push(c);
                 }
@@ -474,8 +525,7 @@ impl InputHandler {
             }
 
             // Character input
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::Search { ref mut query } = self.mode {
                     query.push(c);
                 }
@@ -509,12 +559,11 @@ impl InputHandler {
                 Action::None
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let name_empty =
-                    if let InputMode::NewProject { ref name, .. } = self.mode {
-                        name.is_empty()
-                    } else {
-                        true
-                    };
+                let name_empty = if let InputMode::NewProject { ref name, .. } = self.mode {
+                    name.is_empty()
+                } else {
+                    true
+                };
                 if name_empty {
                     Action::None
                 } else {
@@ -527,8 +576,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::NewProject { ref mut name, .. } = self.mode {
                     name.push(c);
                 }
@@ -545,17 +593,16 @@ impl InputHandler {
                 Action::None
             }
             (KeyModifiers::NONE, KeyCode::Enter) => {
-                let (name, path) =
-                    if let InputMode::NewProject {
-                        ref name,
-                        ref path_input,
-                        ..
-                    } = self.mode
-                    {
-                        (name.clone(), path_input.clone())
-                    } else {
-                        return Action::None;
-                    };
+                let (name, path) = if let InputMode::NewProject {
+                    ref name,
+                    ref path_input,
+                    ..
+                } = self.mode
+                {
+                    (name.clone(), path_input.clone())
+                } else {
+                    return Action::None;
+                };
                 self.mode = InputMode::Normal;
                 Action::CreateProject { name, path }
             }
@@ -572,8 +619,7 @@ impl InputHandler {
                 }
                 Action::NewProjectPathChanged
             }
-            (KeyModifiers::NONE, KeyCode::Down)
-            | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
+            (KeyModifiers::NONE, KeyCode::Down) | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
                 if let InputMode::NewProject {
                     ref completions,
                     ref mut selected_completion,
@@ -581,14 +627,12 @@ impl InputHandler {
                 } = self.mode
                 {
                     if !completions.is_empty() {
-                        *selected_completion =
-                            (*selected_completion + 1) % completions.len();
+                        *selected_completion = (*selected_completion + 1) % completions.len();
                     }
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Up)
-            | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+            (KeyModifiers::NONE, KeyCode::Up) | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 if let InputMode::NewProject {
                     ref completions,
                     ref mut selected_completion,
@@ -605,8 +649,7 @@ impl InputHandler {
                 }
                 Action::None
             }
-            (KeyModifiers::NONE, KeyCode::Char(c))
-            | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
+            (KeyModifiers::NONE, KeyCode::Char(c)) | (KeyModifiers::SHIFT, KeyCode::Char(c)) => {
                 if let InputMode::NewProject {
                     ref mut path_input,
                     ref mut selected_completion,
@@ -625,10 +668,7 @@ impl InputHandler {
 
 /// Check if a position is within a rectangle.
 fn is_in_rect(col: u16, row: u16, rect: &Rect) -> bool {
-    col >= rect.x
-        && col < rect.x + rect.width
-        && row >= rect.y
-        && row < rect.y + rect.height
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
 /// Check if a position is over any terminal pane.
@@ -1419,25 +1459,34 @@ mod tests {
     }
 
     #[test]
-    fn test_click_in_pane() {
+    fn test_click_in_pane_inner_starts_selection() {
         let layout = mock_layout(120, 40, 28);
         let mut handler = InputHandler::new();
         let action = handler.handle_mouse(mock_mouse_click(60, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { .. }));
+        // Click in pane inner area starts a text selection
+        assert!(matches!(action, Action::StartSelection { .. }));
     }
 
     #[test]
-    fn test_click_in_pane_returns_correct_index() {
+    fn test_click_in_pane_returns_correct_selection_index() {
         let layout = mock_split_layout(120, 40, 28);
         let mut handler = InputHandler::new();
 
-        // Click in first pane (left side, after sidebar)
-        let action = handler.handle_mouse(mock_mouse_click(30, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { pane_index: 0 }));
+        // Click well inside first pane inner area (left side, after sidebar)
+        // Pane 0 inner: x=29, w=44, y=1, h=37
+        let action = handler.handle_mouse(mock_mouse_click(40, 10), &layout);
+        assert!(
+            matches!(action, Action::StartSelection { pane_index: 0, .. }),
+            "Expected StartSelection for pane 0, got: {:?}",
+            action
+        );
 
-        // Click in second pane (right side)
+        // Click in second pane inner area (right side)
         let action = handler.handle_mouse(mock_mouse_click(100, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { pane_index: 1 }));
+        assert!(matches!(
+            action,
+            Action::StartSelection { pane_index: 1, .. }
+        ));
     }
 
     #[test]
@@ -1627,7 +1676,8 @@ mod tests {
         handler.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
 
         if let InputMode::NewProject {
-            selected_completion, ..
+            selected_completion,
+            ..
         } = handler.mode()
         {
             assert_eq!(*selected_completion, 1);
@@ -1645,7 +1695,8 @@ mod tests {
         handler.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
 
         if let InputMode::NewProject {
-            selected_completion, ..
+            selected_completion,
+            ..
         } = handler.mode()
         {
             assert_eq!(*selected_completion, 1);

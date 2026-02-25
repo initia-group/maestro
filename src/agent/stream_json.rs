@@ -321,10 +321,14 @@ mod tests {
 
     #[test]
     fn test_parse_tool_result_event() {
-        let line =
-            r#"{"type":"tool_result","tool":"Edit","output":"File edited successfully"}"#;
+        let line = r#"{"type":"tool_result","tool":"Edit","output":"File edited successfully"}"#;
         let event = parse_stream_event(line).unwrap();
-        if let StreamEvent::ToolResult { tool, output, error } = event {
+        if let StreamEvent::ToolResult {
+            tool,
+            output,
+            error,
+        } = event
+        {
             assert_eq!(tool, "Edit");
             assert_eq!(output.unwrap(), "File edited successfully");
             assert!(error.is_none());
@@ -335,10 +339,14 @@ mod tests {
 
     #[test]
     fn test_parse_tool_result_error_event() {
-        let line =
-            r#"{"type":"tool_result","tool":"Bash","error":"Command failed"}"#;
+        let line = r#"{"type":"tool_result","tool":"Bash","error":"Command failed"}"#;
         let event = parse_stream_event(line).unwrap();
-        if let StreamEvent::ToolResult { tool, output, error } = event {
+        if let StreamEvent::ToolResult {
+            tool,
+            output,
+            error,
+        } = event
+        {
             assert_eq!(tool, "Bash");
             assert!(output.is_none());
             assert_eq!(error.unwrap(), "Command failed");
@@ -422,7 +430,10 @@ mod tests {
     #[test]
     fn test_stream_state_spawning() {
         let state = StreamJsonState::new();
-        assert!(matches!(state.to_agent_state(), AgentState::Spawning { .. }));
+        assert!(matches!(
+            state.to_agent_state(),
+            AgentState::Spawning { .. }
+        ));
     }
 
     #[test]

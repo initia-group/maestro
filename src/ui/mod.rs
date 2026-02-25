@@ -12,8 +12,8 @@ pub mod terminal_pane;
 pub mod theme;
 
 // Re-export core types for convenient access.
-pub use layout::{ActiveLayout, AppLayout, PaneLayout, calculate_layout};
+pub use layout::{calculate_layout, ActiveLayout, AppLayout, PaneLayout};
 pub use pane_manager::PaneManager;
 pub use sidebar::{Sidebar, SidebarItem, SidebarState};
-pub use terminal_pane::{EmptyPane, TerminalPane, cursor_position};
+pub use terminal_pane::{cursor_position, EmptyPane, TerminalPane};
 pub use theme::Theme;

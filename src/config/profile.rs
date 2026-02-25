@@ -28,9 +28,9 @@ impl ProfileManager {
 
     /// Get the currently active profile.
     pub fn active(&self) -> Option<&ProfileConfig> {
-        self.active_profile.as_ref().and_then(|name| {
-            self.profiles.iter().find(|p| p.name == *name)
-        })
+        self.active_profile
+            .as_ref()
+            .and_then(|name| self.profiles.iter().find(|p| p.name == *name))
     }
 
     /// Get the name of the currently active profile.

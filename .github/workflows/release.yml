@@ -1,0 +1,168 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-13
+            use_cross: false
+          - target: aarch64-apple-darwin
+            os: macos-14
+            use_cross: false
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: true
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package binary
+        run: |
+          ARCHIVE_NAME="maestro-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p "${ARCHIVE_NAME}"
+          cp "target/${{ matrix.target }}/release/maestro" "${ARCHIVE_NAME}/"
+          cp README.md LICENSE "${ARCHIVE_NAME}/" 2>/dev/null || true
+          cp config/default.toml "${ARCHIVE_NAME}/" 2>/dev/null || true
+          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          echo "ARCHIVE=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+
+      - name: Generate SHA256
+        run: shasum -a 256 "${{ env.ARCHIVE }}" > "${{ env.ARCHIVE }}.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            *.tar.gz
+            *.sha256
+
+  update-homebrew:
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download SHA256 checksums
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Extract checksums and generate formula
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA_AARCH64_DARWIN=$(grep "aarch64-apple-darwin" *.sha256 | awk '{print $1}')
+          SHA_X86_64_DARWIN=$(grep "x86_64-apple-darwin" *.sha256 | awk '{print $1}')
+          SHA_AARCH64_LINUX=$(grep "aarch64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
+          SHA_X86_64_LINUX=$(grep "x86_64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
+          mkdir -p Formula
+          {
+            echo 'class Maestro < Formula'
+            echo '  desc "TUI agent dashboard for Claude Code"'
+            echo '  homepage "https://github.com/initia-group/maestro"'
+            echo "  version \"${VERSION}\""
+            echo '  license "MIT"'
+            echo ''
+            echo '  on_macos do'
+            echo '    on_arm do'
+            echo '      url "https://github.com/initia-group/maestro/releases/download/v#{version}/maestro-v#{version}-aarch64-apple-darwin.tar.gz"'
+            echo "      sha256 \"${SHA_AARCH64_DARWIN}\""
+            echo '    end'
+            echo '    on_intel do'
+            echo '      url "https://github.com/initia-group/maestro/releases/download/v#{version}/maestro-v#{version}-x86_64-apple-darwin.tar.gz"'
+            echo "      sha256 \"${SHA_X86_64_DARWIN}\""
+            echo '    end'
+            echo '  end'
+            echo ''
+            echo '  on_linux do'
+            echo '    on_arm do'
+            echo '      url "https://github.com/initia-group/maestro/releases/download/v#{version}/maestro-v#{version}-aarch64-unknown-linux-gnu.tar.gz"'
+            echo "      sha256 \"${SHA_AARCH64_LINUX}\""
+            echo '    end'
+            echo '    on_intel do'
+            echo '      url "https://github.com/initia-group/maestro/releases/download/v#{version}/maestro-v#{version}-x86_64-unknown-linux-gnu.tar.gz"'
+            echo "      sha256 \"${SHA_X86_64_LINUX}\""
+            echo '    end'
+            echo '  end'
+            echo ''
+            echo '  def install'
+            echo '    bin.install "maestro"'
+            echo '  end'
+            echo ''
+            echo '  test do'
+            echo '    assert_match "maestro", shell_output("#{bin}/maestro --version")'
+            echo '  end'
+            echo 'end'
+          } > Formula/maestro.rb
+
+      - name: Push to Homebrew tap
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          git clone https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/initia-group/homebrew-tap.git tap-repo
+          cp -r Formula tap-repo/
+          cd tap-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/maestro.rb
+          git commit -m "Update maestro to ${GITHUB_REF_NAME}"
+          git push

@@ -28,7 +28,6 @@ pub enum Action {
     None,
 
     // ── Navigation ────────────────────────────────────────
-
     /// Select the next agent in the sidebar list.
     SelectNext,
     /// Select the previous agent in the sidebar list.
@@ -43,7 +42,6 @@ pub enum Action {
     FocusAgent(AgentId),
 
     // ── Mode Switching ────────────────────────────────────
-
     /// Enter Insert mode (PTY interaction) for the selected agent.
     EnterInsertMode,
     /// Exit Insert mode, return to Normal.
@@ -63,14 +61,12 @@ pub enum Action {
     CloseSpawnPicker,
 
     // ── Agent Lifecycle ───────────────────────────────────
-
     /// Spawn a new agent (using defaults or prompting for template).
     SpawnAgent,
     /// Spawn an agent of the given kind (from the spawn picker).
     SpawnVariant(SpawnKind),
 
     // ── Project Lifecycle ────────────────────────────────
-
     /// Enter the two-step new-project dialog.
     EnterNewProjectMode,
     /// Advance from the Name step to the Path step in the new-project dialog.
@@ -87,6 +83,10 @@ pub enum Action {
     ConfirmRenameProject { old_name: String, new_name: String },
     /// Cancel the project rename and return to Normal mode.
     CancelRenameProject,
+    /// Move the selected agent one position up within its project.
+    MoveAgentUp,
+    /// Move the selected agent one position down within its project.
+    MoveAgentDown,
     /// Kill the currently selected agent.
     KillAgent,
     /// Restart the currently selected agent.
@@ -105,14 +105,12 @@ pub enum Action {
     },
 
     // ── PTY Interaction ───────────────────────────────────
-
     /// Send raw bytes to the focused agent's PTY.
     SendToPty(Vec<u8>),
     /// Resize the PTY to the given (cols, rows).
     ResizePty(u16, u16),
 
     // ── Layout ────────────────────────────────────────────
-
     /// Create a horizontal split.
     SplitHorizontal,
     /// Create a vertical split.
@@ -123,7 +121,6 @@ pub enum Action {
     CloseSplit,
 
     // ── Scrollback ────────────────────────────────────────
-
     /// Scroll up half a page in the terminal pane.
     ScrollUp,
     /// Scroll down half a page in the terminal pane.
@@ -134,7 +131,6 @@ pub enum Action {
     SearchPrev,
 
     // ── Profiles ──────────────────────────────────────────
-
     /// Switch to a named workspace profile.
     SwitchProfile { profile_name: String },
     /// List available profiles (result shown in status bar or overlay).
@@ -143,14 +139,28 @@ pub enum Action {
     ShowCurrentProfile,
 
     // ── Mouse ─────────────────────────────────────────────
-
     /// User clicked a specific row in the sidebar.
     SidebarClick { row: usize },
     /// User clicked a terminal pane to focus it.
     PaneFocusClick { pane_index: usize },
 
-    // ── Application ───────────────────────────────────────
+    // ── Selection & Copy ─────────────────────────────────
+    /// Start a text selection at the given pane-relative position.
+    StartSelection {
+        pane_index: usize,
+        row: u16,
+        col: u16,
+    },
+    /// Update the text selection end position (mouse drag).
+    UpdateSelection { row: u16, col: u16 },
+    /// Finalize the selection (mouse release).
+    FinalizeSelection,
+    /// Clear any active text selection.
+    ClearSelection,
+    /// Copy the current selection to the system clipboard.
+    CopySelection,
 
+    // ── Application ───────────────────────────────────────
     /// Toggle the help overlay.
     ToggleHelp,
     /// Quit the application.

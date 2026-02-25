@@ -15,7 +15,11 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "maestro", version, about = "TUI agent dashboard for Claude Code")]
+#[command(
+    name = "maestro",
+    version,
+    about = "TUI agent dashboard for Claude Code"
+)]
 struct Cli {
     /// Path to config file
     #[arg(short, long)]
@@ -41,8 +45,7 @@ async fn main() -> Result<()> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&cli.log_level)),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cli.log_level)),
         )
         .with_writer(non_blocking)
         .with_ansi(false)

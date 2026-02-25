@@ -145,10 +145,7 @@ pub fn validate_config(config: &MaestroConfig) -> Result<()> {
         let mut agent_names = HashSet::new();
         for agent in &project.agent {
             if agent.name.is_empty() {
-                bail!(
-                    "Agent name must not be empty in project '{}'",
-                    project.name
-                );
+                bail!("Agent name must not be empty in project '{}'", project.name);
             }
             if !agent_names.insert(&agent.name) {
                 bail!(

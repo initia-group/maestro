@@ -9,15 +9,15 @@ use std::collections::HashSet;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, StatefulWidget, Widget};
 
-use crate::agent::state::AgentState;
+use crate::agent::state::{AgentState, PromptType};
 use crate::agent::AgentId;
 use crate::ui::theme::Theme;
 
-/// Agent info tuple used when rebuilding the sidebar: `(id, name, state, uptime)`.
-pub type AgentInfo = (AgentId, String, AgentState, String);
+/// Agent info tuple used when rebuilding the sidebar: `(id, name, state, uptime, has_unread_result)`.
+pub type AgentInfo = (AgentId, String, AgentState, String, bool);
 
 /// Project data for sidebar rebuild: `(project_name, agents)`.
 pub type ProjectAgents = (String, Vec<AgentInfo>);
@@ -40,6 +40,7 @@ pub enum SidebarItem {
         project_name: String,
         state: AgentState,
         uptime: String,
+        has_unread_result: bool,
     },
 }
 
@@ -75,10 +76,7 @@ impl SidebarState {
     /// `projects` is an ordered list of `(project_name, agents)` where each
     /// agent is `(id, name, state, uptime)`. This avoids coupling to
     /// `AgentManager` directly, making the sidebar testable in isolation.
-    pub fn rebuild(
-        &mut self,
-        projects: &[ProjectAgents],
-    ) {
+    pub fn rebuild(&mut self, projects: &[ProjectAgents]) {
         self.items.clear();
 
         for (project_name, agents) in projects {
@@ -91,13 +89,14 @@ impl SidebarState {
             });
 
             if !is_collapsed {
-                for (id, name, state, uptime) in agents {
+                for (id, name, state, uptime, has_unread_result) in agents {
                     self.items.push(SidebarItem::Agent {
                         id: *id,
                         name: name.clone(),
                         project_name: project_name.clone(),
                         state: state.clone(),
                         uptime: uptime.clone(),
+                        has_unread_result: *has_unread_result,
                     });
                 }
             }
@@ -254,11 +253,17 @@ impl Default for SidebarState {
 pub struct Sidebar<'a> {
     theme: &'a Theme,
     show_uptime: bool,
+    /// Pulse animation phase (0..7) for WaitingForInput indicators.
+    pulse_phase: u8,
 }
 
 impl<'a> Sidebar<'a> {
-    pub fn new(theme: &'a Theme, show_uptime: bool) -> Self {
-        Self { theme, show_uptime }
+    pub fn new(theme: &'a Theme, show_uptime: bool, pulse_phase: u8) -> Self {
+        Self {
+            theme,
+            show_uptime,
+            pulse_phase,
+        }
     }
 }
 
@@ -320,9 +325,10 @@ impl<'a> StatefulWidget for Sidebar<'a> {
                     name,
                     state: agent_state,
                     uptime,
+                    has_unread_result,
                     ..
                 } => {
-                    self.render_agent_row(buf, &row, name, agent_state, uptime);
+                    self.render_agent_row(buf, &row, name, agent_state, uptime, *has_unread_result);
                 }
             }
         }
@@ -338,15 +344,22 @@ struct RowArea {
 }
 
 impl<'a> Sidebar<'a> {
-    /// Fill the full row width with the selection background if selected.
-    fn fill_row_bg(&self, buf: &mut Buffer, row: &RowArea) {
-        if !row.is_selected {
-            return;
-        }
-        let bg = Style::default().bg(self.theme.sidebar_selected_bg);
-        for col in row.x..row.x + row.width {
-            if let Some(cell) = buf.cell_mut((col, row.y)) {
-                cell.set_style(bg);
+    /// Fill the full row width with a background color.
+    ///
+    /// If the row is selected, always uses `sidebar_selected_bg`.
+    /// Otherwise uses `state_bg` if provided (state-based tint), or skips.
+    fn fill_row_bg(&self, buf: &mut Buffer, row: &RowArea, state_bg: Option<Color>) {
+        let bg_color = if row.is_selected {
+            Some(self.theme.sidebar_selected_bg)
+        } else {
+            state_bg
+        };
+        if let Some(bg) = bg_color {
+            let style = Style::default().bg(bg);
+            for col in row.x..row.x + row.width {
+                if let Some(cell) = buf.cell_mut((col, row.y)) {
+                    cell.set_style(style);
+                }
             }
         }
     }
@@ -371,7 +384,7 @@ impl<'a> Sidebar<'a> {
             self.theme.sidebar_project_header
         };
 
-        self.fill_row_bg(buf, row);
+        self.fill_row_bg(buf, row, None);
         buf.set_string(row.x + 1, row.y, &truncated, style);
     }
 
@@ -382,9 +395,36 @@ impl<'a> Sidebar<'a> {
         name: &str,
         agent_state: &AgentState,
         uptime: &str,
+        has_unread_result: bool,
     ) {
         let status_symbol = agent_state.symbol();
         let status_style = self.theme.status_style(agent_state.color_key());
+        let is_waiting = matches!(agent_state, AgentState::WaitingForInput { .. });
+        let is_ask = matches!(
+            agent_state,
+            AgentState::WaitingForInput {
+                prompt_type: PromptType::AskUserQuestion { .. },
+                ..
+            }
+        );
+
+        // For WaitingForInput, use pulsing colors — blue/purple for AskUserQuestion,
+        // yellow for other waiting types.
+        let symbol_style = if is_ask {
+            let pulse_bg = self.theme.pulse_ask_symbol_color(self.pulse_phase);
+            status_style.bg(pulse_bg)
+        } else if is_waiting {
+            let pulse_bg = self.theme.pulse_waiting_symbol_color(self.pulse_phase);
+            status_style.bg(pulse_bg)
+        } else {
+            match self
+                .theme
+                .status_symbol_bg(agent_state.color_key(), has_unread_result)
+            {
+                Some(bg) => status_style.bg(bg),
+                None => status_style,
+            }
+        };
 
         let name_style = if row.is_selected {
             self.theme
@@ -394,36 +434,69 @@ impl<'a> Sidebar<'a> {
             self.theme.sidebar_agent_name
         };
 
-        self.fill_row_bg(buf, row);
+        let state_bg = if is_ask {
+            Some(self.theme.pulse_ask_row_color(self.pulse_phase))
+        } else if is_waiting {
+            Some(self.theme.pulse_waiting_row_color(self.pulse_phase))
+        } else {
+            self.theme.sidebar_row_state_bg(agent_state.color_key())
+        };
+        self.fill_row_bg(buf, row, state_bg);
 
-        // Layout: "  ● agent-name"
+        // Layout: "  ● agent-name            5m"
         //  x+1: indent (2 spaces)
         //  x+3: status symbol (1 char + 1 space)
         //  x+5: agent name
         let indent = "  ";
         buf.set_string(row.x + 1, row.y, indent, name_style);
-        buf.set_string(row.x + 3, row.y, status_symbol, status_style);
+        buf.set_string(row.x + 3, row.y, status_symbol, symbol_style);
+        let right_label: Option<&str> = if is_waiting {
+            // Show context-specific right label per prompt type
+            match agent_state {
+                AgentState::WaitingForInput { prompt_type, .. } => match prompt_type {
+                    PromptType::ToolApproval { .. } => Some("\u{25C0} approve"), // "◀ approve"
+                    PromptType::AskUserQuestion { .. } => Some("\u{25C0} answer"), // "◀ answer"
+                    PromptType::Question => Some("\u{25C0} reply"),              // "◀ reply"
+                    PromptType::InputPrompt => Some("\u{25C0} input"),           // "◀ input"
+                    PromptType::Unknown => Some("\u{25C0} input"),               // "◀ input"
+                },
+                _ => unreachable!(),
+            }
+        } else if self.show_uptime && !uptime.is_empty() {
+            Some(uptime)
+        } else {
+            None
+        };
 
         // Calculate available width for agent name.
         let prefix_used: u16 = 5; // 1 padding + 2 indent + 1 symbol + 1 space
-        let uptime_reserve: u16 = if self.show_uptime && !uptime.is_empty() {
-            uptime.len() as u16 + 2 // space + uptime + trailing pad
-        } else {
-            0
+        let right_reserve: u16 = match &right_label {
+            Some(label) => label.len() as u16 + 2, // space + label + trailing pad
+            None => 0,
         };
-        let available = row
+        let total_available = row
             .width
             .saturating_sub(prefix_used)
-            .saturating_sub(uptime_reserve) as usize;
-        let truncated_name = truncate_name(name, available);
-        buf.set_string(row.x + 5, row.y, &truncated_name, name_style);
+            .saturating_sub(right_reserve);
 
-        // Uptime right-aligned if enabled.
-        if self.show_uptime && !uptime.is_empty() {
-            let uptime_width = uptime.len() as u16;
-            if uptime_width + 1 < row.width {
-                let uptime_x = row.x + row.width - uptime_width - 1;
-                buf.set_string(uptime_x, row.y, uptime, self.theme.sidebar_uptime);
+        if total_available > 0 {
+            let truncated_name = truncate_name(name, total_available as usize);
+            buf.set_string(row.x + 5, row.y, &truncated_name, name_style);
+        }
+
+        // Right-aligned label.
+        if let Some(label) = right_label {
+            let label_width = label.len() as u16;
+            if label_width + 1 < row.width {
+                let label_x = row.x + row.width - label_width - 1;
+                let label_style = if is_waiting {
+                    self.theme
+                        .status_style("waiting")
+                        .add_modifier(ratatui::style::Modifier::BOLD)
+                } else {
+                    self.theme.sidebar_uptime
+                };
+                buf.set_string(label_x, row.y, label, label_style);
             }
         }
     }
@@ -478,7 +551,7 @@ mod tests {
     use chrono::Utc;
 
     /// Helper to build test project data.
-    fn test_projects() -> Vec<(String, Vec<(AgentId, String, AgentState, String)>)> {
+    fn test_projects() -> Vec<(String, Vec<(AgentId, String, AgentState, String, bool)>)> {
         let id1 = AgentId::new();
         let id2 = AgentId::new();
         let id3 = AgentId::new();
@@ -489,18 +562,16 @@ mod tests {
                     (
                         id1,
                         "backend".to_string(),
-                        AgentState::Running {
-                            since: Utc::now(),
-                        },
+                        AgentState::Running { since: Utc::now() },
                         "5m".to_string(),
+                        false,
                     ),
                     (
                         id2,
                         "frontend".to_string(),
-                        AgentState::Idle {
-                            since: Utc::now(),
-                        },
+                        AgentState::Idle { since: Utc::now() },
                         "2m".to_string(),
+                        false,
                     ),
                 ],
             ),
@@ -514,6 +585,7 @@ mod tests {
                         exit_code: Some(0),
                     },
                     "8m".to_string(),
+                    false,
                 )],
             ),
         ]
@@ -795,10 +867,7 @@ mod tests {
 
     #[test]
     fn truncate_long_name() {
-        assert_eq!(
-            truncate_name("this-is-a-very-long-name", 10),
-            "this-is-a…"
-        );
+        assert_eq!(truncate_name("this-is-a-very-long-name", 10), "this-is-a…");
     }
 
     #[test]
@@ -821,7 +890,7 @@ mod tests {
     #[test]
     fn render_empty_state() {
         let theme = Theme::default_dark();
-        let sidebar = Sidebar::new(&theme, true);
+        let sidebar = Sidebar::new(&theme, true, 0);
         let mut state = SidebarState::new();
 
         let area = Rect::new(0, 0, 28, 10);
@@ -836,7 +905,7 @@ mod tests {
     #[test]
     fn render_with_agents() {
         let theme = Theme::default_dark();
-        let sidebar = Sidebar::new(&theme, true);
+        let sidebar = Sidebar::new(&theme, true, 0);
         let mut state = build_state_with_projects();
 
         let area = Rect::new(0, 0, 28, 10);
@@ -853,7 +922,7 @@ mod tests {
     #[test]
     fn render_collapsed_hides_agents() {
         let theme = Theme::default_dark();
-        let sidebar = Sidebar::new(&theme, false);
+        let sidebar = Sidebar::new(&theme, false, 0);
         let mut state = build_state_with_projects();
 
         // Collapse myapp.
@@ -876,7 +945,7 @@ mod tests {
     #[test]
     fn render_uptime_hidden_when_disabled() {
         let theme = Theme::default_dark();
-        let sidebar = Sidebar::new(&theme, false); // show_uptime = false
+        let sidebar = Sidebar::new(&theme, false, 0); // show_uptime = false
         let mut state = build_state_with_projects();
         state.selected_index = 1; // select backend agent
 
@@ -892,7 +961,7 @@ mod tests {
     #[test]
     fn render_scrolling() {
         let theme = Theme::default_dark();
-        let sidebar = Sidebar::new(&theme, false);
+        let sidebar = Sidebar::new(&theme, false, 0);
 
         // Build many items so they exceed visible height.
         let mut projects = Vec::new();
@@ -901,10 +970,9 @@ mod tests {
             agents.push((
                 AgentId::new(),
                 format!("agent-{}", i),
-                AgentState::Running {
-                    since: Utc::now(),
-                },
+                AgentState::Running { since: Utc::now() },
                 String::new(),
+                false,
             ));
         }
         projects.push(("bigproject".to_string(), agents));
@@ -948,5 +1016,33 @@ mod tests {
             lines.push(line);
         }
         lines.join("\n")
+    }
+
+    #[test]
+    fn render_waiting_agent_with_pulse_phases() {
+        let theme = Theme::default_dark();
+        for phase in 0..8u8 {
+            let sidebar = Sidebar::new(&theme, false, phase);
+            let mut state = SidebarState::new();
+            let id = AgentId::new();
+            state.rebuild(&[(
+                "proj".to_string(),
+                vec![(
+                    id,
+                    "waiter".to_string(),
+                    AgentState::WaitingForInput {
+                        since: Utc::now(),
+                        prompt_type: crate::agent::state::PromptType::Question,
+                    },
+                    "1m".to_string(),
+                    false,
+                )],
+            )]);
+            let area = Rect::new(0, 0, 28, 10);
+            let mut buf = Buffer::empty(area);
+            sidebar.render(area, &mut buf, &mut state);
+            let content = buffer_to_string(&buf);
+            assert!(content.contains("waiter"));
+        }
     }
 }

@@ -80,7 +80,10 @@ impl EventBus {
                         );
                         // Only handle key press events (not release/repeat).
                         if key.kind == KeyEventKind::Press
-                            && tx.send(AppEvent::Input(InputEvent::Key(key))).await.is_err()
+                            && tx
+                                .send(AppEvent::Input(InputEvent::Key(key)))
+                                .await
+                                .is_err()
                         {
                             break;
                         }
