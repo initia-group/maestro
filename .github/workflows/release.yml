@@ -59,11 +59,12 @@ jobs:
       - name: Package binary
         run: |
           ARCHIVE_NAME="maestro-${{ github.ref_name }}-${{ matrix.target }}"
-          mkdir -p "${ARCHIVE_NAME}"
-          cp "target/${{ matrix.target }}/release/maestro" "${ARCHIVE_NAME}/"
-          cp README.md LICENSE "${ARCHIVE_NAME}/" 2>/dev/null || true
-          cp config/default.toml "${ARCHIVE_NAME}/" 2>/dev/null || true
-          tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
+          STAGE_DIR="staging-${ARCHIVE_NAME}"
+          mkdir -p "${STAGE_DIR}"
+          cp "target/${{ matrix.target }}/release/maestro" "${STAGE_DIR}/"
+          cp README.md LICENSE "${STAGE_DIR}/" 2>/dev/null || true
+          cp config/default.toml "${STAGE_DIR}/" 2>/dev/null || true
+          tar czf "${ARCHIVE_NAME}.tar.gz" -C "${STAGE_DIR}" .
           echo "ARCHIVE=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
 
       - name: Generate SHA256
