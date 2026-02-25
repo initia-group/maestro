@@ -13,8 +13,80 @@ use ratatui::widgets::{Block, Borders, Widget};
 use tui_term::widget::PseudoTerminal;
 
 use crate::agent::scrollback::SearchState;
-use crate::agent::state::AgentState;
+use crate::agent::state::{AgentState, PromptType};
 use crate::ui::theme::Theme;
+
+/// A text selection within a terminal pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextSelection {
+    /// The pane index where the selection lives.
+    pub pane_index: usize,
+    /// Starting position (row, col) relative to the pane inner area.
+    pub start: (u16, u16),
+    /// Current end position (row, col) relative to the pane inner area.
+    pub end: (u16, u16),
+}
+
+impl TextSelection {
+    /// Create a new selection starting at the given position.
+    pub fn new(pane_index: usize, row: u16, col: u16) -> Self {
+        Self {
+            pane_index,
+            start: (row, col),
+            end: (row, col),
+        }
+    }
+
+    /// Whether start and end are the same (a click, not a drag).
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
+
+    /// Normalize start/end so start <= end (top-left to bottom-right).
+    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+        if self.start.0 < self.end.0
+            || (self.start.0 == self.end.0 && self.start.1 <= self.end.1)
+        {
+            (self.start, self.end)
+        } else {
+            (self.end, self.start)
+        }
+    }
+}
+
+/// Extract the text within a selection from a vt100 screen.
+pub fn extract_selected_text(screen: &vt100::Screen, selection: &TextSelection) -> String {
+    let ((sr, sc), (er, ec)) = selection.normalized();
+    let contents = screen.contents();
+    let lines: Vec<&str> = contents.lines().collect();
+    let mut result = String::new();
+
+    for row in sr..=er {
+        let row_idx = row as usize;
+        if row_idx >= lines.len() {
+            break;
+        }
+        let line = lines[row_idx];
+        let chars: Vec<char> = line.chars().collect();
+
+        let start_col = if row == sr { sc as usize } else { 0 };
+        let end_col = if row == er {
+            (ec as usize + 1).min(chars.len())
+        } else {
+            chars.len()
+        };
+
+        let clamped_start = start_col.min(chars.len());
+        let clamped_end = end_col.min(chars.len());
+        let selected: String = chars[clamped_start..clamped_end].iter().collect();
+        result.push_str(&selected);
+        if row < er {
+            result.push('\n');
+        }
+    }
+
+    result
+}
 
 /// Renders the terminal output of a single agent inside a bordered pane.
 ///
@@ -38,6 +110,10 @@ pub struct TerminalPane<'a> {
     scroll_offset: usize,
     /// Optional search state for highlighting matches.
     search_state: Option<&'a SearchState>,
+    /// Optional text selection for highlighting.
+    selection: Option<&'a TextSelection>,
+    /// Pulse animation phase (0..7) for WaitingForInput indicator.
+    pulse_phase: u8,
 }
 
 impl<'a> TerminalPane<'a> {
@@ -58,6 +134,8 @@ impl<'a> TerminalPane<'a> {
             theme,
             scroll_offset: 0,
             search_state: None,
+            selection: None,
+            pulse_phase: 0,
         }
     }
 
@@ -72,21 +150,56 @@ impl<'a> TerminalPane<'a> {
         self.search_state = search;
         self
     }
+
+    /// Set the text selection for highlighting.
+    pub fn with_selection(mut self, selection: Option<&'a TextSelection>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// Set the pulse animation phase for WaitingForInput indicators.
+    pub fn with_pulse_phase(mut self, phase: u8) -> Self {
+        self.pulse_phase = phase;
+        self
+    }
 }
 
 impl Widget for TerminalPane<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let status_symbol = self.agent_state.symbol();
         let status_style = self.theme.status_style(self.agent_state.color_key());
+        let detail = self.agent_state.detail_label();
+        let is_waiting = matches!(self.agent_state, AgentState::WaitingForInput { .. });
+        let is_ask = matches!(
+            self.agent_state,
+            AgentState::WaitingForInput {
+                prompt_type: PromptType::AskUserQuestion { .. },
+                ..
+            }
+        );
 
-        // Build styled title spans:  " Agent: name @ project [symbol] "
+        // For WaitingForInput, pulse the symbol background in the title bar.
+        // AskUserQuestion gets a distinct blue/purple pulse.
+        let symbol_style = if is_ask {
+            let pulse_bg = self.theme.pulse_ask_symbol_color(self.pulse_phase);
+            status_style.bg(pulse_bg)
+        } else if is_waiting {
+            let pulse_bg = self.theme.pulse_waiting_symbol_color(self.pulse_phase);
+            status_style.bg(pulse_bg)
+        } else {
+            status_style
+        };
+
+        // Build styled title spans:  " Agent: name @ project [symbol label] "
         let mut title = vec![
             Span::raw(" Agent: "),
             Span::styled(self.agent_name, self.theme.terminal_title),
             Span::raw(" @ "),
             Span::raw(self.project_name),
             Span::raw(" ["),
-            Span::styled(status_symbol, status_style),
+            Span::styled(status_symbol, symbol_style),
+            Span::raw(" "),
+            Span::styled(detail, symbol_style),
             Span::raw("] "),
         ];
 
@@ -99,8 +212,15 @@ impl Widget for TerminalPane<'_> {
             ));
         }
 
-        // Choose border style based on focus
-        let border_style = if self.is_focused {
+        // Choose border style: pulse for WaitingForInput, focus-aware otherwise.
+        // AskUserQuestion gets a distinct blue/purple border pulse.
+        let border_style = if is_ask {
+            let pulse_color = self.theme.pulse_ask_symbol_color(self.pulse_phase);
+            Style::default().fg(pulse_color)
+        } else if is_waiting {
+            let pulse_color = self.theme.pulse_waiting_symbol_color(self.pulse_phase);
+            Style::default().fg(pulse_color)
+        } else if self.is_focused {
             self.theme.terminal_title
         } else {
             self.theme.terminal_border
@@ -114,157 +234,24 @@ impl Widget for TerminalPane<'_> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Render the vt100 screen using tui-term
+        // Render the vt100 screen using tui-term.
+        // When scrolled, the caller sets vt100's scrollback offset via
+        // set_scrollback() before passing the screen, so PseudoTerminal
+        // automatically renders the scrollback-adjusted view.
         if inner.width > 0 && inner.height > 0 {
             let pseudo_term = PseudoTerminal::new(self.screen);
             pseudo_term.render(inner, buf);
-
-            // When scrolled, render the scrollback view on top of the tui-term output.
-            // We manually render the screen contents at the scroll offset position.
-            if self.scroll_offset > 0 {
-                render_scrolled_content(self.screen, inner, buf, self.scroll_offset);
-            }
 
             // Render search highlights if search is active
             if let Some(search) = self.search_state {
                 render_search_highlights(buf, inner, search, self.scroll_offset);
             }
-        }
-    }
-}
 
-/// Render the terminal screen content at a scroll offset.
-///
-/// When the user scrolls up, we need to show historical content from the
-/// vt100 scrollback buffer rather than the live screen bottom. This function
-/// reads the screen contents line by line and renders them with the offset
-/// applied.
-fn render_scrolled_content(
-    screen: &vt100::Screen,
-    area: Rect,
-    buf: &mut Buffer,
-    scroll_offset: usize,
-) {
-    let rows = area.height as usize;
-    let cols = area.width as usize;
-    let total_scrollback = screen.scrollback();
-
-    // Clamp offset to available scrollback
-    let clamped_offset = scroll_offset.min(total_scrollback);
-    if clamped_offset == 0 {
-        return; // Nothing to do, tui-term already rendered the live view
-    }
-
-    // Clear the inner area first
-    for row in 0..rows {
-        let y = area.y + row as u16;
-        for col in 0..cols {
-            let x = area.x + col as u16;
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.reset();
+            // Render selection highlight if a selection is active
+            if let Some(sel) = self.selection {
+                render_selection_highlight(buf, inner, sel);
             }
         }
-    }
-
-    // Get the full screen contents including scrollback, then render the
-    // appropriate window. The vt100 screen's `contents_formatted()` gives
-    // us the visible screen. For scrollback we use `rows_formatted()`.
-    //
-    // The scrollback rows are indexed from 0 (oldest) to scrollback-1 (newest).
-    // The visible screen rows are 0 to screen_rows-1.
-    //
-    // When scrolled up by `offset`, we want to show:
-    //   - Scrollback rows from (total_scrollback - offset) .. total_scrollback
-    //   - Then visible screen rows from 0 .. (rows - offset)
-    // But we need to fit exactly `rows` lines total.
-
-    let screen_rows = screen.size().0 as usize;
-
-    for visible_row in 0..rows {
-        // The logical row in the full history (scrollback + screen).
-        // At offset=0, we show screen rows 0..rows (the live view).
-        // At offset=N, we shift up by N, so we show older content.
-        let logical_row_from_bottom = (rows - 1 - visible_row) + clamped_offset;
-
-        let y = area.y + visible_row as u16;
-
-        if logical_row_from_bottom < screen_rows {
-            // This row is in the visible screen area
-            let screen_row = (screen_rows - 1 - logical_row_from_bottom) as u16;
-            render_vt100_row(screen, screen_row, false, area.x, y, cols, buf);
-        } else {
-            // This row is in the scrollback buffer
-            let scrollback_row_from_bottom = logical_row_from_bottom - screen_rows;
-            if scrollback_row_from_bottom < total_scrollback {
-                let scrollback_row =
-                    (total_scrollback - 1 - scrollback_row_from_bottom) as u16;
-                render_vt100_row(screen, scrollback_row, true, area.x, y, cols, buf);
-            }
-            // If beyond available scrollback, the row stays cleared/empty
-        }
-    }
-}
-
-/// Render a single row from the vt100 screen (either scrollback or visible).
-fn render_vt100_row(
-    screen: &vt100::Screen,
-    row: u16,
-    is_scrollback: bool,
-    start_x: u16,
-    y: u16,
-    max_cols: usize,
-    buf: &mut Buffer,
-) {
-    let screen_cols = screen.size().1 as usize;
-    let render_cols = max_cols.min(screen_cols);
-
-    for col in 0..render_cols {
-        // vt100 0.16 does not expose individual scrollback cells;
-        // scrollback rendering will be enabled when the crate adds the API.
-        let cell = if is_scrollback {
-            None
-        } else {
-            screen.cell(row, col as u16)
-        };
-
-        if let Some(cell) = cell {
-            let x = start_x + col as u16;
-            if let Some(buf_cell) = buf.cell_mut((x, y)) {
-                let ch = cell.contents();
-                if ch.is_empty() {
-                    buf_cell.set_symbol(" ");
-                } else {
-                    buf_cell.set_symbol(ch);
-                }
-
-                // Apply vt100 colors/attributes
-                let fg = vt100_color_to_ratatui(cell.fgcolor());
-                let bg = vt100_color_to_ratatui(cell.bgcolor());
-                let mut style = Style::default().fg(fg).bg(bg);
-                if cell.bold() {
-                    style = style.add_modifier(ratatui::style::Modifier::BOLD);
-                }
-                if cell.italic() {
-                    style = style.add_modifier(ratatui::style::Modifier::ITALIC);
-                }
-                if cell.underline() {
-                    style = style.add_modifier(ratatui::style::Modifier::UNDERLINED);
-                }
-                if cell.inverse() {
-                    style = style.add_modifier(ratatui::style::Modifier::REVERSED);
-                }
-                buf_cell.set_style(style);
-            }
-        }
-    }
-}
-
-/// Convert a vt100 color to a ratatui color.
-fn vt100_color_to_ratatui(color: vt100::Color) -> Color {
-    match color {
-        vt100::Color::Default => Color::Reset,
-        vt100::Color::Idx(i) => Color::Indexed(i),
-        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
 }
 
@@ -319,6 +306,36 @@ fn render_search_highlights(
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_style(style);
                 }
+            }
+        }
+    }
+}
+
+/// After rendering the terminal, overlay the selection highlight.
+fn render_selection_highlight(buf: &mut Buffer, pane_area: Rect, selection: &TextSelection) {
+    let selection_style = Style::default()
+        .bg(Color::Rgb(68, 138, 255))
+        .fg(Color::White);
+
+    let ((sr, sc), (er, ec)) = selection.normalized();
+
+    for row in sr..=er {
+        let y = pane_area.y + row;
+        if y >= pane_area.y + pane_area.height {
+            break;
+        }
+
+        let start_col = if row == sr { sc } else { 0 };
+        let end_col = if row == er {
+            ec + 1
+        } else {
+            pane_area.width
+        };
+
+        for col in start_col..end_col.min(pane_area.width) {
+            let x = pane_area.x + col;
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.set_style(selection_style);
             }
         }
     }

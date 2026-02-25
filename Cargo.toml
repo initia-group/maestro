@@ -47,6 +47,7 @@ chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 fuzzy-matcher = "0.3"
 notify-rust = "4"
+arboard = "3"
 
 [dev-dependencies]
 insta = "1"

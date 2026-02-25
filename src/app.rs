@@ -4,6 +4,7 @@
 //! and coordinates the main event loop with rendering and action dispatch.
 
 use crate::agent::manager::AgentManager;
+use crate::agent::state::AgentState;
 use crate::agent::AgentId;
 use crate::config::loader::expand_tilde;
 use crate::config::profile::ProfileManager;
@@ -25,13 +26,15 @@ use crate::ui::pane_manager::PaneManager;
 use crate::ui::spawn_picker::SpawnPicker;
 use crate::ui::sidebar::{ProjectAgents, Sidebar, SidebarState};
 use crate::ui::status_bar::StatusBar;
-use crate::ui::terminal_pane::{cursor_position, EmptyPane, TerminalPane};
+use crate::ui::terminal_pane::{
+    cursor_position, extract_selected_text, EmptyPane, TerminalPane, TextSelection,
+};
 use crate::ui::theme::Theme;
 use chrono::Utc;
 use color_eyre::eyre::Result;
 use ratatui::prelude::*;
 use ratatui::Terminal;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -84,6 +87,15 @@ pub struct App {
 
     /// Session manager for persistence.
     session_manager: SessionManager,
+
+    /// Active text selection (mouse drag).
+    selection: Option<TextSelection>,
+
+    /// Transient status message shown in the status bar (auto-expires).
+    status_message: Option<(String, Instant)>,
+
+    /// Pulse animation phase counter (0..7) for WaitingForInput indicators.
+    pulse_phase: u8,
 }
 
 impl App {
@@ -131,6 +143,9 @@ impl App {
             palette_suggestions,
             session_manager,
             config,
+            selection: None,
+            status_message: None,
+            pulse_phase: 0,
         }
     }
 
@@ -287,9 +302,45 @@ impl App {
 
             AppEvent::StateTick => {
                 let changes = self.agent_manager.detect_all_states();
-                if !changes.is_empty() {
+                let mut needs_rebuild = !changes.is_empty();
+
+                // Auto-retry Claude agents that failed due to a stale --resume session ID.
+                let stale_ids: Vec<AgentId> = changes
+                    .iter()
+                    .filter(|(_, _, new)| matches!(new, AgentState::Errored { .. }))
+                    .filter_map(|(id, _, _)| {
+                        self.agent_manager
+                            .get(*id)
+                            .and_then(|h| h.is_stale_resume_failure(10).then_some(*id))
+                    })
+                    .collect();
+
+                for id in stale_ids {
+                    let pty_size = self.calculate_default_pty_size(self.last_area);
+                    match self.agent_manager.retry_without_resume(id, pty_size) {
+                        Ok(_new_id) => {
+                            info!("Auto-retried stale session agent {}", id);
+                            needs_rebuild = true;
+                        }
+                        Err(e) => {
+                            warn!("Failed to auto-retry stale session agent {}: {}", id, e);
+                        }
+                    }
+                }
+
+                if needs_rebuild {
                     self.rebuild_sidebar();
+                    self.populate_pane_agents();
                     self.dirty = true;
+                }
+
+                // Advance pulse phase and force re-render if any agent is waiting.
+                let counts = self.agent_manager.state_counts();
+                if counts.waiting > 0 {
+                    self.pulse_phase = (self.pulse_phase + 1) % 8;
+                    self.dirty = true;
+                } else {
+                    self.pulse_phase = 0;
                 }
             }
 
@@ -325,15 +376,49 @@ impl App {
     // ---- Action Dispatch ----
 
     fn dispatch_action(&mut self, action: Action) -> Result<()> {
+        // Clear selection on view-changing actions (not on selection-related ones)
+        if self.selection.is_some() {
+            match action {
+                Action::StartSelection { .. }
+                | Action::UpdateSelection { .. }
+                | Action::FinalizeSelection
+                | Action::ClearSelection
+                | Action::CopySelection
+                | Action::None => {}
+                _ => {
+                    self.selection = None;
+                    self.dirty = true;
+                }
+            }
+        }
+
         match action {
             // Navigation
             Action::SelectNext => {
                 self.sidebar_state.select_next();
+                self.mark_selected_agent_read();
                 self.dirty = true;
             }
             Action::SelectPrev => {
                 self.sidebar_state.select_prev();
+                self.mark_selected_agent_read();
                 self.dirty = true;
+            }
+            Action::MoveAgentUp => {
+                if let Some(id) = self.sidebar_state.selected_agent_id() {
+                    self.agent_manager.move_agent_up(id);
+                    self.rebuild_sidebar();
+                    self.sidebar_state.select_agent(id);
+                    self.dirty = true;
+                }
+            }
+            Action::MoveAgentDown => {
+                if let Some(id) = self.sidebar_state.selected_agent_id() {
+                    self.agent_manager.move_agent_down(id);
+                    self.rebuild_sidebar();
+                    self.sidebar_state.select_agent(id);
+                    self.dirty = true;
+                }
             }
             Action::NextProject => {
                 self.sidebar_state.next_project();
@@ -345,10 +430,12 @@ impl App {
             }
             Action::JumpToAgent(n) => {
                 self.sidebar_state.jump_to_agent(n);
+                self.mark_selected_agent_read();
                 self.dirty = true;
             }
             Action::FocusAgent(id) => {
                 self.sidebar_state.select_agent(id);
+                self.mark_selected_agent_read();
                 self.dirty = true;
             }
 
@@ -708,6 +795,7 @@ impl App {
                 let scroll_offset = self.sidebar_state.scroll_offset();
                 let item_index = scroll_offset + row;
                 self.sidebar_state.set_selected(item_index);
+                self.mark_selected_agent_read();
                 self.dirty = true;
             }
             Action::PaneFocusClick { pane_index } => {
@@ -815,6 +903,51 @@ impl App {
             | Action::Tick
             | Action::Resize(_, _) => {}
 
+            // Text selection & copy
+            Action::StartSelection {
+                pane_index,
+                row,
+                col,
+            } => {
+                self.pane_manager.set_focused_pane(pane_index);
+                self.selection = Some(TextSelection::new(pane_index, row, col));
+                self.dirty = true;
+            }
+            Action::UpdateSelection { row, col } => {
+                if let Some(ref mut sel) = self.selection {
+                    sel.end = (row, col);
+                    self.dirty = true;
+                }
+            }
+            Action::FinalizeSelection => {
+                if let Some(ref sel) = self.selection {
+                    if sel.is_empty() {
+                        // Just a click (no drag) — clear selection
+                        self.selection = None;
+                    } else {
+                        // Auto-copy to clipboard on selection finalize.
+                        // On macOS, Command+C is intercepted by the terminal emulator
+                        // and never reaches the app, so auto-copy is the most reliable path.
+                        let sel = sel.clone();
+                        self.copy_selection_to_clipboard(&sel);
+                    }
+                }
+                self.dirty = true;
+            }
+            Action::ClearSelection => {
+                self.selection = None;
+                self.dirty = true;
+            }
+            Action::CopySelection => {
+                if let Some(ref sel) = self.selection {
+                    let sel = sel.clone();
+                    if self.copy_selection_to_clipboard(&sel) {
+                        self.selection = None;
+                    }
+                }
+                self.dirty = true;
+            }
+
             Action::None => {}
         }
 
@@ -826,9 +959,80 @@ impl App {
         Ok(())
     }
 
+    /// Set a transient status message that auto-expires after 2 seconds.
+    fn set_status_message(&mut self, msg: &str) {
+        self.status_message = Some((msg.to_string(), Instant::now()));
+        self.dirty = true;
+    }
+
+    /// Copy the given selection's text to the system clipboard.
+    /// Handles scrollback view synchronization so the correct content is extracted.
+    /// Returns `true` if text was successfully copied.
+    fn copy_selection_to_clipboard(&mut self, sel: &TextSelection) -> bool {
+        let Some(id) = self.get_pane_agent_id(sel.pane_index) else {
+            return false;
+        };
+
+        let scroll_offset = self
+            .agent_manager
+            .get(id)
+            .map(|h| h.scroll_offset())
+            .unwrap_or(0);
+
+        // Temporarily set scrollback view to match what the user sees,
+        // so screen.contents() returns the visually displayed content.
+        if scroll_offset > 0 {
+            if let Some(handle) = self.agent_manager.get_mut(id) {
+                handle.set_scrollback_view(scroll_offset);
+            }
+        }
+
+        let copied = if let Some(handle) = self.agent_manager.get(id) {
+            let text = extract_selected_text(handle.screen(), sel);
+            if !text.is_empty() {
+                match crate::clipboard::copy_to_clipboard(&text) {
+                    Ok(()) => {
+                        self.set_status_message("Copied to clipboard");
+                        true
+                    }
+                    Err(msg) => {
+                        self.set_status_message(&format!("Copy failed: {}", msg));
+                        false
+                    }
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Reset scrollback view to live
+        if scroll_offset > 0 {
+            if let Some(handle) = self.agent_manager.get_mut(id) {
+                handle.set_scrollback_view(0);
+            }
+        }
+
+        copied
+    }
+
+    /// Expire old status messages (called during render).
+    fn expire_status_message(&mut self) {
+        if let Some((_, created_at)) = &self.status_message {
+            if created_at.elapsed() > Duration::from_secs(2) {
+                self.status_message = None;
+                self.dirty = true;
+            }
+        }
+    }
+
     // ---- Rendering ----
 
     fn render(&mut self, frame: &mut Frame) {
+        // Expire old status messages
+        self.expire_status_message();
+
         let area = frame.area();
 
         // Check minimum size
@@ -847,7 +1051,7 @@ impl App {
         let layout = calculate_layout(area, self.config.ui.sidebar_width, self.pane_manager.layout());
 
         // Render sidebar
-        let sidebar = Sidebar::new(&self.theme, self.config.ui.show_uptime);
+        let sidebar = Sidebar::new(&self.theme, self.config.ui.show_uptime, self.pulse_phase);
         frame.render_stateful_widget(sidebar, layout.sidebar, &mut self.sidebar_state);
 
         // Render terminal pane(s)
@@ -855,27 +1059,57 @@ impl App {
             let is_focused = i == self.pane_manager.focused_pane();
             let agent_id = self.get_pane_agent_id(i);
 
-            match agent_id.and_then(|id| self.agent_manager.get(id)) {
-                Some(handle) => {
-                    let terminal_pane = TerminalPane::new(
-                        handle.screen(),
-                        handle.name(),
-                        handle.project_name(),
-                        handle.state(),
-                        is_focused,
-                        &self.theme,
-                    )
-                    .with_scroll_offset(handle.scroll_offset())
-                    .with_search(handle.scrollback().search());
-                    frame.render_widget(terminal_pane, pane.area);
+            match agent_id {
+                Some(id) => {
+                    // Read scroll offset and set vt100 scrollback view (requires &mut)
+                    let scroll_offset = self
+                        .agent_manager
+                        .get(id)
+                        .map(|h| h.scroll_offset())
+                        .unwrap_or(0);
+                    if scroll_offset > 0 {
+                        if let Some(handle) = self.agent_manager.get_mut(id) {
+                            handle.set_scrollback_view(scroll_offset);
+                        }
+                    }
 
-                    // Set cursor position in Insert Mode
-                    if matches!(self.input_handler.mode(), InputMode::Insert { .. })
-                        && is_focused
-                    {
-                        if let Some((cx, cy)) = cursor_position(handle.screen(), &pane.inner)
+                    // Render the terminal pane widget (immutable borrow)
+                    if let Some(handle) = self.agent_manager.get(id) {
+                        let terminal_pane = TerminalPane::new(
+                            handle.screen(),
+                            handle.name(),
+                            handle.project_name(),
+                            handle.state(),
+                            is_focused,
+                            &self.theme,
+                        )
+                        .with_scroll_offset(handle.scroll_offset())
+                        .with_search(handle.scrollback().search())
+                        .with_selection(
+                            self.selection
+                                .as_ref()
+                                .filter(|s| s.pane_index == i),
+                        )
+                        .with_pulse_phase(self.pulse_phase);
+                        frame.render_widget(terminal_pane, pane.area);
+
+                        // Set cursor position in Insert Mode (only when not scrolled)
+                        if matches!(self.input_handler.mode(), InputMode::Insert { .. })
+                            && is_focused
+                            && scroll_offset == 0
                         {
-                            frame.set_cursor_position((cx, cy));
+                            if let Some((cx, cy)) =
+                                cursor_position(handle.screen(), &pane.inner)
+                            {
+                                frame.set_cursor_position((cx, cy));
+                            }
+                        }
+                    }
+
+                    // Reset vt100 scrollback to live view
+                    if scroll_offset > 0 {
+                        if let Some(handle) = self.agent_manager.get_mut(id) {
+                            handle.set_scrollback_view(0);
                         }
                     }
                 }
@@ -903,8 +1137,9 @@ impl App {
             completed: manager_counts.completed,
             errored: manager_counts.errored,
         };
-        let status_bar =
-            StatusBar::new(&ui_counts, self.input_handler.mode(), &self.theme);
+        let flash_msg = self.status_message.as_ref().map(|(msg, _)| msg.as_str());
+        let status_bar = StatusBar::new(&ui_counts, self.input_handler.mode(), &self.theme)
+            .with_flash_message(flash_msg);
         frame.render_widget(status_bar, layout.status_bar);
 
         // Render command palette overlay if in Command mode
@@ -961,6 +1196,7 @@ impl App {
         let help_text = vec![
             ("j/k", "Navigate agents"),
             ("J/K", "Navigate projects"),
+            ("Alt+J/K", "Reorder agent down/up"),
             ("1-9", "Jump to agent"),
             ("Enter/i", "Enter Insert Mode (type to agent)"),
             ("Ctrl+G", "Exit Insert Mode → Normal"),
@@ -973,6 +1209,9 @@ impl App {
             ("s/v", "Split horizontal / vertical"),
             ("Tab", "Cycle pane focus"),
             ("Ctrl+W", "Close split"),
+            ("Mouse drag", "Select text (auto-copies)"),
+            ("Alt+C", "Copy selection"),
+            ("Ctrl+Shift+C", "Copy selection"),
             ("Ctrl+U/D", "Scroll up / down"),
             ("/", "Search in output"),
             (":", "Command palette"),
@@ -1130,6 +1369,17 @@ impl App {
         for saved in &snapshot.agents {
             // Ensure the project exists in display order (ignore duplicate errors)
             let _ = self.agent_manager.add_empty_project(&saved.project_name);
+
+            // Ensure config.project is populated so path lookup works for new agents
+            if !self.config.project.iter().any(|p| p.name == saved.project_name) {
+                self.config.project.push(
+                    crate::config::settings::ProjectConfig {
+                        name: saved.project_name.clone(),
+                        path: saved.cwd.clone(),
+                        agent: vec![],
+                    },
+                );
+            }
 
             // Resume the previous Claude Code conversation if this is a claude command.
             // Use --resume <session-id> for exact session matching when available,
@@ -1293,6 +1543,18 @@ impl App {
         }
     }
 
+    /// Mark the currently selected agent's result as read (clears unread indicator).
+    fn mark_selected_agent_read(&mut self) {
+        if let Some(id) = self.sidebar_state.selected_agent_id() {
+            if let Some(handle) = self.agent_manager.get_mut(id) {
+                if handle.has_unread_result() {
+                    handle.mark_result_read();
+                    self.dirty = true;
+                }
+            }
+        }
+    }
+
     fn rebuild_sidebar(&mut self) {
         let projects: Vec<ProjectAgents> = self
             .agent_manager
@@ -1308,6 +1570,7 @@ impl App {
                                 handle.name().to_string(),
                                 handle.state().clone(),
                                 handle.uptime(),
+                                handle.has_unread_result(),
                             )
                         })
                     })

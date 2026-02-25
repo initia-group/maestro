@@ -228,6 +228,8 @@ pub struct DetectionConfig {
     pub error_patterns: Vec<String>,
     /// Additional regex patterns for input prompt detection.
     pub input_prompt_patterns: Vec<String>,
+    /// Additional regex patterns for AskUserQuestion detection.
+    pub ask_user_question_patterns: Vec<String>,
     /// Number of bottom screen lines to scan for patterns.
     pub scan_lines: usize,
 }
@@ -238,7 +240,8 @@ impl Default for DetectionConfig {
             tool_approval_patterns: vec![],
             error_patterns: vec![],
             input_prompt_patterns: vec![],
-            scan_lines: 5,
+            ask_user_question_patterns: vec![],
+            scan_lines: 10,
         }
     }
 }
@@ -307,7 +310,7 @@ mod tests {
         assert_eq!(config.ui.theme.name, "default");
         assert!(config.project.is_empty());
         assert!(config.template.is_empty());
-        assert_eq!(config.detection.scan_lines, 5);
+        assert_eq!(config.detection.scan_lines, 10);
         assert!(config.notifications.enabled);
         assert_eq!(config.notifications.cooldown_secs, 10);
         assert!(config.session.enabled);

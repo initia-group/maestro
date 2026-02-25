@@ -235,6 +235,60 @@ impl AgentManager {
         Ok(new_id)
     }
 
+    /// Retry a failed `--resume` agent by spawning a fresh session.
+    ///
+    /// Strips `--resume`/`-r` and its session-id value from the args,
+    /// removes the errored agent, and spawns a new one. The new agent
+    /// has `resume_retry_attempted` set to prevent further retries.
+    pub fn retry_without_resume(
+        &mut self,
+        id: AgentId,
+        pty_size: PtySize,
+    ) -> Result<AgentId> {
+        let params = match self.agents.get(&id) {
+            Some(handle) => handle.restart_params(),
+            None => bail!("Agent {} not found", id),
+        };
+
+        // Strip --resume/-r and its value from args
+        let mut new_args: Vec<String> = Vec::new();
+        let mut skip_next = false;
+        for arg in &params.args {
+            if skip_next {
+                skip_next = false;
+                continue;
+            }
+            if arg == "--resume" || arg == "-r" {
+                skip_next = true;
+                continue;
+            }
+            new_args.push(arg.clone());
+        }
+
+        // Remove the errored agent (already exited, no need to kill)
+        self.agents.remove(&id);
+        self.remove_from_display_order(id);
+
+        // Spawn fresh replacement
+        let new_id = self.spawn(
+            params.name,
+            params.project_name,
+            params.command,
+            new_args,
+            params.cwd,
+            params.env,
+            pty_size,
+        )?;
+
+        // Prevent further auto-retry on the new handle
+        if let Some(handle) = self.agents.get_mut(&new_id) {
+            handle.set_resume_retry_attempted(true);
+        }
+
+        info!("Retried stale session agent {} -> {} (fresh session)", id, new_id);
+        Ok(new_id)
+    }
+
     /// Rename an agent by ID.
     ///
     /// Validates that the new name is not empty and not a duplicate
@@ -490,6 +544,30 @@ impl AgentManager {
             ids.retain(|&i| i != id);
         }
         self.display_order.retain(|(_, ids)| !ids.is_empty());
+    }
+
+    /// Move the given agent one position earlier within its project group.
+    pub fn move_agent_up(&mut self, id: AgentId) {
+        for (_, ids) in &mut self.display_order {
+            if let Some(pos) = ids.iter().position(|&i| i == id) {
+                if pos > 0 {
+                    ids.swap(pos - 1, pos);
+                }
+                return;
+            }
+        }
+    }
+
+    /// Move the given agent one position later within its project group.
+    pub fn move_agent_down(&mut self, id: AgentId) {
+        for (_, ids) in &mut self.display_order {
+            if let Some(pos) = ids.iter().position(|&i| i == id) {
+                if pos + 1 < ids.len() {
+                    ids.swap(pos, pos + 1);
+                }
+                return;
+            }
+        }
     }
 }
 

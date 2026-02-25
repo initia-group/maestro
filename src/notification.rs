@@ -78,6 +78,10 @@ impl NotificationManager {
                     "Agent needs approval",
                     format!("{}: Allow {} ?", agent_name, tool_name),
                 )),
+                PromptType::AskUserQuestion { ref question } => Some((
+                    "Agent is asking a question",
+                    format!("{}: {}", agent_name, question),
+                )),
                 PromptType::Question => Some((
                     "Agent has a question",
                     format!("{} is waiting for your input", agent_name),

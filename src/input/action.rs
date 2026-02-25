@@ -87,6 +87,10 @@ pub enum Action {
     ConfirmRenameProject { old_name: String, new_name: String },
     /// Cancel the project rename and return to Normal mode.
     CancelRenameProject,
+    /// Move the selected agent one position up within its project.
+    MoveAgentUp,
+    /// Move the selected agent one position down within its project.
+    MoveAgentDown,
     /// Kill the currently selected agent.
     KillAgent,
     /// Restart the currently selected agent.
@@ -148,6 +152,23 @@ pub enum Action {
     SidebarClick { row: usize },
     /// User clicked a terminal pane to focus it.
     PaneFocusClick { pane_index: usize },
+
+    // ── Selection & Copy ─────────────────────────────────
+
+    /// Start a text selection at the given pane-relative position.
+    StartSelection {
+        pane_index: usize,
+        row: u16,
+        col: u16,
+    },
+    /// Update the text selection end position (mouse drag).
+    UpdateSelection { row: u16, col: u16 },
+    /// Finalize the selection (mouse release).
+    FinalizeSelection,
+    /// Clear any active text selection.
+    ClearSelection,
+    /// Copy the current selection to the system clipboard.
+    CopySelection,
 
     // ── Application ───────────────────────────────────────
 

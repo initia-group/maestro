@@ -43,6 +43,8 @@ pub struct StatusBar<'a> {
     state_counts: &'a StateCounts,
     mode: &'a InputMode,
     theme: &'a Theme,
+    /// Optional transient flash message (replaces hints when present).
+    flash_message: Option<&'a str>,
 }
 
 impl<'a> StatusBar<'a> {
@@ -51,7 +53,14 @@ impl<'a> StatusBar<'a> {
             state_counts,
             mode,
             theme,
+            flash_message: None,
         }
+    }
+
+    /// Set a transient flash message to display in the center section.
+    pub fn with_flash_message(mut self, msg: Option<&'a str>) -> Self {
+        self.flash_message = msg;
+        self
     }
 
     /// Build the left section: agent state counts with colored indicators.
@@ -249,7 +258,14 @@ impl<'a> Widget for StatusBar<'a> {
         // Build sections.
         let count_spans = self.build_counts_spans();
         let mode_span = self.build_mode_span();
-        let hint_spans = self.build_hint_spans(area.width);
+        let hint_spans = if let Some(msg) = self.flash_message {
+            let flash_style = Style::default()
+                .fg(ratatui::style::Color::Yellow)
+                .add_modifier(ratatui::style::Modifier::BOLD);
+            vec![Span::styled(msg, flash_style)]
+        } else {
+            self.build_hint_spans(area.width)
+        };
 
         // Calculate widths.
         let count_width: usize = count_spans.iter().map(|s| s.width()).sum();

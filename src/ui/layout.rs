@@ -56,6 +56,26 @@ pub fn is_terminal_large_enough(area: Rect) -> bool {
     area.width >= MIN_COLS && area.height >= MIN_ROWS
 }
 
+/// Compute effective sidebar width based on terminal width.
+///
+/// On wider terminals the sidebar gets a few extra columns so agent
+/// names aren't truncated while the content area has plenty of room.
+/// The result is clamped so the sidebar never exceeds 40% of the
+/// terminal width.
+fn effective_sidebar_width(configured: u16, terminal_width: u16) -> u16 {
+    let extra = if terminal_width >= 180 {
+        8
+    } else if terminal_width >= 120 {
+        4
+    } else {
+        0
+    };
+    let width = configured + extra;
+    // Never let the sidebar eat more than 40% of the terminal.
+    let max_width = terminal_width * 2 / 5;
+    width.min(max_width)
+}
+
 /// Calculate the complete application layout.
 ///
 /// Divides the terminal area into sidebar, terminal panes, and status bar
@@ -66,6 +86,8 @@ pub fn is_terminal_large_enough(area: Rect) -> bool {
 /// * `sidebar_width` — configured sidebar width in columns.
 /// * `layout` — the active layout mode.
 pub fn calculate_layout(area: Rect, sidebar_width: u16, layout: &ActiveLayout) -> AppLayout {
+    let sidebar_width = effective_sidebar_width(sidebar_width, area.width);
+
     // Step 1: Split into [main content | status bar]
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -267,7 +289,7 @@ mod tests {
         let area = Rect::new(0, 0, 120, 40);
         let layout = calculate_layout(area, 28, &ActiveLayout::Single);
 
-        assert_eq!(layout.sidebar.width, 28);
+        assert_eq!(layout.sidebar.width, 32); // 28 + 4 (wide terminal bonus)
         assert_eq!(layout.panes.len(), 1);
         assert_eq!(layout.status_bar.height, 1);
         assert_eq!(layout.status_bar.y, 39); // bottom row
@@ -361,12 +383,48 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_width_matches_config() {
+    fn sidebar_width_matches_config_on_small_terminal() {
+        // Below 120 cols, sidebar uses configured width as-is.
         for width in [20u16, 28, 35, 40] {
-            let area = Rect::new(0, 0, 120, 40);
+            let area = Rect::new(0, 0, 100, 40);
             let layout = calculate_layout(area, width, &ActiveLayout::Single);
             assert_eq!(layout.sidebar.width, width);
         }
+    }
+
+    #[test]
+    fn sidebar_grows_on_wide_terminal() {
+        // At 120 cols, sidebar gets +4 (28 → 32).
+        let area = Rect::new(0, 0, 120, 40);
+        let layout = calculate_layout(area, 28, &ActiveLayout::Single);
+        assert_eq!(layout.sidebar.width, 32);
+
+        // At 180 cols, sidebar gets +8 (28 → 36).
+        let area = Rect::new(0, 0, 180, 40);
+        let layout = calculate_layout(area, 28, &ActiveLayout::Single);
+        assert_eq!(layout.sidebar.width, 36);
+    }
+
+    #[test]
+    fn sidebar_clamped_to_40_percent() {
+        // On a 60-col terminal, 40% = 24, so configured 28 gets clamped.
+        let area = Rect::new(0, 0, 60, 40);
+        let layout = calculate_layout(area, 28, &ActiveLayout::Single);
+        assert_eq!(layout.sidebar.width, 24);
+    }
+
+    #[test]
+    fn effective_sidebar_width_logic() {
+        // Small terminal — no extra width.
+        assert_eq!(super::effective_sidebar_width(28, 100), 28);
+        // Medium terminal — +4.
+        assert_eq!(super::effective_sidebar_width(28, 120), 32);
+        assert_eq!(super::effective_sidebar_width(28, 150), 32);
+        // Large terminal — +8.
+        assert_eq!(super::effective_sidebar_width(28, 180), 36);
+        assert_eq!(super::effective_sidebar_width(28, 250), 36);
+        // Clamp: 50-col terminal, 40% = 20, configured 28 → clamped to 20.
+        assert_eq!(super::effective_sidebar_width(28, 50), 20);
     }
 
     #[test]

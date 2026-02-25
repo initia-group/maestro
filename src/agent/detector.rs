@@ -21,6 +21,8 @@ pub struct DetectionPatterns {
     error: Vec<Regex>,
     /// Built-in input prompt patterns + user-configured additions.
     input_prompt: Vec<Regex>,
+    /// Built-in AskUserQuestion patterns + user-configured additions.
+    ask_user_question: Vec<Regex>,
     /// Number of bottom screen lines to scan.
     scan_lines: usize,
 }
@@ -69,10 +71,25 @@ impl DetectionPatterns {
             }
         }
 
+        // AskUserQuestion patterns: detect Claude Code's interactive numbered-option prompts.
+        let mut ask_user_question = vec![
+            // Numbered option line (with optional selection cursor ❯)
+            Regex::new(r"^\s*❯?\s*\d+[\.:]\s+.+").unwrap(),
+            // The auto-appended "Other" / "Type something else" option
+            Regex::new(r"(?i)type something else|other.*free.text").unwrap(),
+        ];
+        for pattern in &config.ask_user_question_patterns {
+            match Regex::new(pattern) {
+                Ok(re) => ask_user_question.push(re),
+                Err(e) => warn!("Invalid ask_user_question regex {pattern:?}: {e}"),
+            }
+        }
+
         Self {
             tool_approval,
             error,
             input_prompt,
+            ask_user_question,
             scan_lines: config.scan_lines,
         }
     }
@@ -163,6 +180,21 @@ pub fn detect_state(patterns: &DetectionPatterns, signals: &DetectionSignals) ->
         }
         return AgentState::WaitingForInput {
             prompt_type: PromptType::ToolApproval { tool_name },
+            since: Utc::now(),
+        };
+    }
+
+    // Check for AskUserQuestion interactive prompts (numbered options)
+    if let Some(question) = detect_ask_user_question(patterns, bottom_lines) {
+        if let AgentState::WaitingForInput {
+            prompt_type: PromptType::AskUserQuestion { .. },
+            ..
+        } = signals.current_state
+        {
+            return signals.current_state.clone();
+        }
+        return AgentState::WaitingForInput {
+            prompt_type: PromptType::AskUserQuestion { question },
             since: Utc::now(),
         };
     }
@@ -258,6 +290,60 @@ fn detect_input_prompt(patterns: &DetectionPatterns, lines: &[String]) -> bool {
     false
 }
 
+/// Check if the bottom lines show a Claude Code AskUserQuestion interactive prompt.
+///
+/// Looks for the pattern of numbered options (e.g., "❯ 1. Summary - Brief overview")
+/// with at least 2 option lines, and optionally extracts the question text from
+/// a preceding line ending with `?`.
+fn detect_ask_user_question(patterns: &DetectionPatterns, lines: &[String]) -> Option<String> {
+    let numbered_option_re = &patterns.ask_user_question[0]; // ❯?\s*\d+[.:]\s+.+
+
+    // Count how many lines match the numbered option pattern
+    let option_count = lines
+        .iter()
+        .filter(|l| numbered_option_re.is_match(l.trim()))
+        .count();
+
+    // Need at least 2 numbered option lines to consider this an AskUserQuestion
+    if option_count < 2 {
+        return None;
+    }
+
+    // Find the first numbered option line index
+    let first_option_idx = lines
+        .iter()
+        .position(|l| numbered_option_re.is_match(l.trim()));
+
+    // Try to extract the question text from lines above the options
+    if let Some(opt_idx) = first_option_idx {
+        for i in (0..opt_idx).rev() {
+            let trimmed = lines[i].trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.ends_with('?') {
+                // Found a question line — truncate for display
+                let question = if trimmed.len() > 80 {
+                    format!("{}…", &trimmed[..79])
+                } else {
+                    trimmed.to_string()
+                };
+                return Some(question);
+            }
+            // Take the first non-empty line above options as context
+            let question = if trimmed.len() > 80 {
+                format!("{}…", &trimmed[..79])
+            } else {
+                trimmed.to_string()
+            };
+            return Some(question);
+        }
+    }
+
+    // No question text found above, but the options pattern is clear
+    Some("Interactive prompt".to_string())
+}
+
 /// Check if the bottom lines contain a question.
 fn detect_question(lines: &[String]) -> bool {
     for line in lines.iter().rev() {
@@ -347,7 +433,7 @@ impl DetectionDebounce {
         }
 
         // If same as current state, no transition needed
-        if &detected == current {
+        if detected.same_variant(current) {
             self.pending = None;
             self.count = 0;
             return None;
@@ -355,7 +441,7 @@ impl DetectionDebounce {
 
         // Check if this matches the pending detection
         match &self.pending {
-            Some(pending) if *pending == detected => {
+            Some(pending) if pending.same_variant(&detected) => {
                 self.count += 1;
                 if self.count >= self.threshold {
                     self.pending = None;
@@ -398,7 +484,8 @@ mod tests {
         assert!(!patterns.tool_approval.is_empty());
         assert!(!patterns.error.is_empty());
         assert!(!patterns.input_prompt.is_empty());
-        assert_eq!(patterns.scan_lines, 5);
+        assert!(!patterns.ask_user_question.is_empty());
+        assert_eq!(patterns.scan_lines, 10);
     }
 
     #[test]
@@ -407,6 +494,7 @@ mod tests {
             tool_approval_patterns: vec!["approve\\?".into()],
             error_patterns: vec!["FATAL".into()],
             input_prompt_patterns: vec![">>>".into()],
+            ask_user_question_patterns: vec!["custom_ask".into()],
             scan_lines: 10,
         };
         let patterns = DetectionPatterns::from_config(&config);
@@ -416,6 +504,8 @@ mod tests {
         assert_eq!(patterns.error.len(), 7);
         // Built-in (2) + user (1) = 3
         assert_eq!(patterns.input_prompt.len(), 3);
+        // Built-in (2) + user (1) = 3
+        assert_eq!(patterns.ask_user_question.len(), 3);
         assert_eq!(patterns.scan_lines, 10);
     }
 
@@ -425,6 +515,7 @@ mod tests {
             tool_approval_patterns: vec!["[invalid".into()],
             error_patterns: vec![],
             input_prompt_patterns: vec![],
+            ask_user_question_patterns: vec![],
             scan_lines: 5,
         };
         let patterns = DetectionPatterns::from_config(&config);
@@ -781,6 +872,74 @@ mod tests {
         assert!(!detect_question(&["?".into()]));
         // Empty lines only
         assert!(!detect_question(&["".into()]));
+    }
+
+    // --- detect_ask_user_question tests ---
+
+    #[test]
+    fn test_ask_user_question_detection() {
+        let patterns = default_patterns();
+        let lines = vec![
+            "Format: How should I format the output?".into(),
+            "❯ 1. Summary - Brief overview".into(),
+            "  2. Detailed - Full explanation".into(),
+            "  3. Type something else...".into(),
+        ];
+        let result = detect_ask_user_question(&patterns, &lines);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("How should I format"));
+    }
+
+    #[test]
+    fn test_ask_user_question_without_cursor() {
+        let patterns = default_patterns();
+        let lines = vec![
+            "Which approach do you prefer?".into(),
+            "  1. Option A - First approach".into(),
+            "  2. Option B - Second approach".into(),
+        ];
+        let result = detect_ask_user_question(&patterns, &lines);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Which approach"));
+    }
+
+    #[test]
+    fn test_ask_user_question_too_few_options() {
+        let patterns = default_patterns();
+        // Only 1 option line — not enough for AskUserQuestion
+        let lines = vec![
+            "Some question?".into(),
+            "  1. Only option".into(),
+        ];
+        let result = detect_ask_user_question(&patterns, &lines);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_ask_user_question_in_detect_state() {
+        let patterns = default_patterns();
+        let signals = DetectionSignals {
+            process_exited: None,
+            screen_lines: vec![
+                "How should we proceed?".into(),
+                "❯ 1. Refactor - Clean up the code".into(),
+                "  2. Leave as-is - Skip changes".into(),
+                "  3. Type something else...".into(),
+            ],
+            seconds_since_output: 1.0,
+            current_state: &AgentState::Running { since: Utc::now() },
+            idle_timeout_secs: 3,
+        };
+        let state = detect_state(&patterns, &signals);
+        match state {
+            AgentState::WaitingForInput {
+                prompt_type: PromptType::AskUserQuestion { question },
+                ..
+            } => {
+                assert!(question.contains("How should we proceed"));
+            }
+            _ => panic!("Expected WaitingForInput(AskUserQuestion), got {state:?}"),
+        }
     }
 
     // --- detect_input_prompt tests ---

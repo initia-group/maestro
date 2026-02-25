@@ -49,6 +49,22 @@ impl InputHandler {
 
     /// Process a key event and return the corresponding action.
     pub fn handle_key(&mut self, key: KeyEvent) -> Action {
+        // Copy selection to clipboard.
+        // macOS: Command key is NOT forwarded by terminal emulators, so we use
+        // Alt+C (Option key is forwarded as Alt) as the macOS-friendly shortcut.
+        // Linux: Ctrl+Shift+C is the standard terminal copy shortcut.
+        // Both work on both platforms via crossterm.
+        // Ctrl+C without Shift must NOT be intercepted — it sends interrupt (0x03) to PTY.
+        if key.modifiers == KeyModifiers::ALT && key.code == KeyCode::Char('c') {
+            return Action::CopySelection;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+            && key.code == KeyCode::Char('C')
+        {
+            return Action::CopySelection;
+        }
+
         match &self.mode {
             InputMode::Normal => self.handle_normal_mode(key),
             InputMode::Insert { .. } => self.handle_insert_mode(key),
@@ -75,6 +91,9 @@ impl InputHandler {
 
             (KeyModifiers::SHIFT, KeyCode::Char('J')) => Action::NextProject,
             (KeyModifiers::SHIFT, KeyCode::Char('K')) => Action::PrevProject,
+
+            (KeyModifiers::ALT, KeyCode::Char('j')) => Action::MoveAgentDown,
+            (KeyModifiers::ALT, KeyCode::Char('k')) => Action::MoveAgentUp,
 
             // ── Jump to agent by number ──
             (KeyModifiers::NONE, KeyCode::Char(c)) if ('1'..='9').contains(&c) => {
@@ -239,6 +258,21 @@ impl InputHandler {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_left_click(mouse.column, mouse.row, layout)
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                // Update selection endpoint during drag
+                for pane in &layout.panes {
+                    if is_in_rect(mouse.column, mouse.row, &pane.inner) {
+                        let rel_row = mouse.row.saturating_sub(pane.inner.y);
+                        let rel_col = mouse.column.saturating_sub(pane.inner.x);
+                        return Action::UpdateSelection {
+                            row: rel_row,
+                            col: rel_col,
+                        };
+                    }
+                }
+                Action::None
+            }
+            MouseEventKind::Up(MouseButton::Left) => Action::FinalizeSelection,
             MouseEventKind::ScrollUp => {
                 if is_over_pane(mouse.column, mouse.row, layout) {
                     Action::ScrollUp
@@ -266,7 +300,20 @@ impl InputHandler {
             };
         }
 
-        // Check if click is in a terminal pane
+        // Check if click is in a terminal pane's inner area (start selection)
+        for (i, pane) in layout.panes.iter().enumerate() {
+            if is_in_rect(col, row, &pane.inner) {
+                let rel_row = row.saturating_sub(pane.inner.y);
+                let rel_col = col.saturating_sub(pane.inner.x);
+                return Action::StartSelection {
+                    pane_index: i,
+                    row: rel_row,
+                    col: rel_col,
+                };
+            }
+        }
+
+        // Check if click is in a terminal pane's border area (focus pane)
         for (i, pane) in layout.panes.iter().enumerate() {
             if is_in_rect(col, row, &pane.area) {
                 return Action::PaneFocusClick { pane_index: i };
@@ -1419,25 +1466,34 @@ mod tests {
     }
 
     #[test]
-    fn test_click_in_pane() {
+    fn test_click_in_pane_inner_starts_selection() {
         let layout = mock_layout(120, 40, 28);
         let mut handler = InputHandler::new();
         let action = handler.handle_mouse(mock_mouse_click(60, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { .. }));
+        // Click in pane inner area starts a text selection
+        assert!(matches!(action, Action::StartSelection { .. }));
     }
 
     #[test]
-    fn test_click_in_pane_returns_correct_index() {
+    fn test_click_in_pane_returns_correct_selection_index() {
         let layout = mock_split_layout(120, 40, 28);
         let mut handler = InputHandler::new();
 
-        // Click in first pane (left side, after sidebar)
-        let action = handler.handle_mouse(mock_mouse_click(30, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { pane_index: 0 }));
+        // Click well inside first pane inner area (left side, after sidebar)
+        // Pane 0 inner: x=29, w=44, y=1, h=37
+        let action = handler.handle_mouse(mock_mouse_click(40, 10), &layout);
+        assert!(
+            matches!(action, Action::StartSelection { pane_index: 0, .. }),
+            "Expected StartSelection for pane 0, got: {:?}",
+            action
+        );
 
-        // Click in second pane (right side)
+        // Click in second pane inner area (right side)
         let action = handler.handle_mouse(mock_mouse_click(100, 10), &layout);
-        assert!(matches!(action, Action::PaneFocusClick { pane_index: 1 }));
+        assert!(matches!(
+            action,
+            Action::StartSelection { pane_index: 1, .. }
+        ));
     }
 
     #[test]

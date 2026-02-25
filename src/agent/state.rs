@@ -94,6 +94,18 @@ impl AgentState {
         }
     }
 
+    /// Returns a detailed human-readable label.
+    ///
+    /// For `WaitingForInput` states, returns the prompt type detail
+    /// (e.g., "Tool: Edit", "Question") instead of the generic "waiting".
+    /// For all other states, returns the same as `label()`.
+    pub fn detail_label(&self) -> String {
+        match self {
+            AgentState::WaitingForInput { prompt_type, .. } => prompt_type.short_text(),
+            other => other.label().to_string(),
+        }
+    }
+
     /// Whether the agent is in a terminal state (no further transitions
     /// possible without explicit restart).
     pub fn is_terminal(&self) -> bool {
@@ -103,6 +115,32 @@ impl AgentState {
     /// Whether the agent's process is still running.
     pub fn is_alive(&self) -> bool {
         !self.is_terminal()
+    }
+
+    /// Compare two states by variant, ignoring timestamps.
+    ///
+    /// Used by the debounce logic to check if consecutive detections agree
+    /// on the state kind without being thrown off by differing `Utc::now()`
+    /// timestamps. For `WaitingForInput`, also compares the `PromptType`.
+    pub fn same_variant(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AgentState::Spawning { .. }, AgentState::Spawning { .. }) => true,
+            (AgentState::Running { .. }, AgentState::Running { .. }) => true,
+            (AgentState::Idle { .. }, AgentState::Idle { .. }) => true,
+            (
+                AgentState::WaitingForInput { prompt_type: a, .. },
+                AgentState::WaitingForInput { prompt_type: b, .. },
+            ) => a.same_kind(b),
+            (
+                AgentState::Completed { exit_code: a, .. },
+                AgentState::Completed { exit_code: b, .. },
+            ) => a == b,
+            (
+                AgentState::Errored { error_hint: a, .. },
+                AgentState::Errored { error_hint: b, .. },
+            ) => a == b,
+            _ => false,
+        }
     }
 }
 
@@ -126,7 +164,12 @@ pub enum PromptType {
         tool_name: String,
     },
 
-    /// Agent is asking a question to the user.
+    /// Agent is showing an interactive AskUserQuestion prompt with numbered options.
+    AskUserQuestion {
+        question: String,
+    },
+
+    /// Agent is asking a question to the user (text ending with ?).
     Question,
 
     /// Agent is showing an input prompt ("> " at the bottom).
@@ -141,9 +184,41 @@ impl PromptType {
     pub fn short_text(&self) -> String {
         match self {
             PromptType::ToolApproval { tool_name } => format!("Tool: {tool_name}"),
+            PromptType::AskUserQuestion { question } => {
+                let truncated = if question.len() > 40 {
+                    format!("{}…", &question[..39])
+                } else {
+                    question.clone()
+                };
+                format!("Ask: {truncated}")
+            }
             PromptType::Question => "Question".to_string(),
             PromptType::InputPrompt => "Input".to_string(),
             PromptType::Unknown => "Waiting".to_string(),
+        }
+    }
+
+    /// Whether this is an AskUserQuestion prompt (any question text).
+    pub fn is_ask_user_question(&self) -> bool {
+        matches!(self, PromptType::AskUserQuestion { .. })
+    }
+
+    /// Compare two prompt types by kind, ignoring inner data.
+    ///
+    /// For `ToolApproval`, compares tool names. For `AskUserQuestion`,
+    /// compares only by variant (ignores question text to avoid flapping
+    /// from minor text differences between detection ticks).
+    pub fn same_kind(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                PromptType::ToolApproval { tool_name: a },
+                PromptType::ToolApproval { tool_name: b },
+            ) => a == b,
+            (PromptType::AskUserQuestion { .. }, PromptType::AskUserQuestion { .. }) => true,
+            (PromptType::Question, PromptType::Question) => true,
+            (PromptType::InputPrompt, PromptType::InputPrompt) => true,
+            (PromptType::Unknown, PromptType::Unknown) => true,
+            _ => false,
         }
     }
 }
@@ -303,6 +378,67 @@ mod tests {
     }
 
     #[test]
+    fn test_detail_label_waiting_states() {
+        let state = AgentState::WaitingForInput {
+            since: Utc::now(),
+            prompt_type: PromptType::ToolApproval {
+                tool_name: "Edit".into(),
+            },
+        };
+        assert_eq!(state.detail_label(), "Tool: Edit");
+
+        let state = AgentState::WaitingForInput {
+            since: Utc::now(),
+            prompt_type: PromptType::Question,
+        };
+        assert_eq!(state.detail_label(), "Question");
+
+        let state = AgentState::WaitingForInput {
+            since: Utc::now(),
+            prompt_type: PromptType::InputPrompt,
+        };
+        assert_eq!(state.detail_label(), "Input");
+
+        let state = AgentState::WaitingForInput {
+            since: Utc::now(),
+            prompt_type: PromptType::Unknown,
+        };
+        assert_eq!(state.detail_label(), "Waiting");
+    }
+
+    #[test]
+    fn test_detail_label_non_waiting_states() {
+        assert_eq!(
+            AgentState::Spawning { since: Utc::now() }.detail_label(),
+            "spawning"
+        );
+        assert_eq!(
+            AgentState::Running { since: Utc::now() }.detail_label(),
+            "running"
+        );
+        assert_eq!(
+            AgentState::Idle { since: Utc::now() }.detail_label(),
+            "idle"
+        );
+        assert_eq!(
+            AgentState::Completed {
+                at: Utc::now(),
+                exit_code: Some(0)
+            }
+            .detail_label(),
+            "done"
+        );
+        assert_eq!(
+            AgentState::Errored {
+                at: Utc::now(),
+                error_hint: None
+            }
+            .detail_label(),
+            "error"
+        );
+    }
+
+    #[test]
     fn test_prompt_type_short_text() {
         assert_eq!(
             PromptType::ToolApproval {
@@ -314,6 +450,41 @@ mod tests {
         assert_eq!(PromptType::Question.short_text(), "Question");
         assert_eq!(PromptType::InputPrompt.short_text(), "Input");
         assert_eq!(PromptType::Unknown.short_text(), "Waiting");
+    }
+
+    #[test]
+    fn test_same_variant_ignores_timestamps() {
+        let t1 = Utc::now();
+        let t2 = t1 + chrono::Duration::seconds(5);
+        assert!(AgentState::Running { since: t1 }.same_variant(&AgentState::Running { since: t2 }));
+        assert!(AgentState::Spawning { since: t1 }.same_variant(&AgentState::Spawning { since: t2 }));
+        assert!(AgentState::Idle { since: t1 }.same_variant(&AgentState::Idle { since: t2 }));
+    }
+
+    #[test]
+    fn test_same_variant_different_variants() {
+        let now = Utc::now();
+        assert!(!AgentState::Running { since: now }.same_variant(&AgentState::Spawning { since: now }));
+        assert!(!AgentState::Running { since: now }.same_variant(&AgentState::Idle { since: now }));
+    }
+
+    #[test]
+    fn test_same_variant_waiting_compares_prompt_type() {
+        let now = Utc::now();
+        let w1 = AgentState::WaitingForInput {
+            since: now,
+            prompt_type: PromptType::Question,
+        };
+        let w2 = AgentState::WaitingForInput {
+            since: now + chrono::Duration::seconds(1),
+            prompt_type: PromptType::Question,
+        };
+        let w3 = AgentState::WaitingForInput {
+            since: now,
+            prompt_type: PromptType::InputPrompt,
+        };
+        assert!(w1.same_variant(&w2));
+        assert!(!w1.same_variant(&w3));
     }
 
     #[test]
