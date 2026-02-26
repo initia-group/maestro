@@ -718,10 +718,7 @@ impl App {
                                 pty_size,
                             ) {
                                 Ok(id) => {
-                                    info!(
-                                        "Auto-spawned Terminal in project '{}'",
-                                        project_name
-                                    );
+                                    info!("Auto-spawned Terminal in project '{}'", project_name);
                                     self.sidebar_state.select_agent(id);
                                     self.populate_pane_agents();
                                 }
