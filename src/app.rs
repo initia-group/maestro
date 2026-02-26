@@ -636,6 +636,7 @@ impl App {
                     let name = project_name.to_string();
                     match self.agent_manager.remove_project(&name) {
                         Ok(()) => {
+                            self.config.project.retain(|p| p.name != name);
                             self.rebuild_sidebar();
                         }
                         Err(e) => warn!("Delete project failed: {}", e),

@@ -407,6 +407,7 @@ pub fn parse_command(input: &str, agent_manager: &AgentManager) -> Result<Action
         }
         "rename" => Ok(Action::EnterRenameMode),
         "rename-project" => Ok(Action::EnterRenameProjectMode),
+        "delete-project" => Ok(Action::RemoveProject),
         "split" => {
             if args.is_empty() {
                 return Err("Usage: split horizontal|vertical|grid|single".into());

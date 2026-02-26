@@ -116,6 +116,7 @@ impl InputHandler {
             (KeyModifiers::NONE, KeyCode::Char('r')) => Action::RestartAgent,
             (KeyModifiers::SHIFT, KeyCode::Char('R')) => Action::EnterRenameMode,
             (KeyModifiers::NONE, KeyCode::F(2)) => Action::EnterRenameProjectMode,
+            (KeyModifiers::SHIFT, KeyCode::Char('D')) => Action::RemoveProject,
 
             // ── Layout ──
             (KeyModifiers::NONE, KeyCode::Char('s')) => Action::SplitHorizontal,
