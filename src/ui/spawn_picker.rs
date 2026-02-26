@@ -12,8 +12,8 @@ use ratatui::widgets::{Block, Borders, Clear, Widget};
 /// The spawn picker menu items: (label, description).
 pub const SPAWN_OPTIONS: &[(&str, &str)] = &[
     ("1. claude", "Regular Claude Code"),
-    ("2. claudeyolo", "Claude + --dangerously-skip-permissions"),
-    ("3. claudeyolo -w", "Claude YOLO in a worktree"),
+    ("2. claude --dangerously-skip-permissions", "Claude + --dangerously-skip-permissions"),
+    ("3. claude --dangerously-skip-permissions -w", "Claude YOLO in a worktree"),
     ("4. terminal", "Plain shell (default shell)"),
 ];
 
