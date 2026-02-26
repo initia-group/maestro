@@ -708,6 +708,7 @@ impl App {
                 } else {
                     match self.agent_manager.add_empty_project(&project_name) {
                         Ok(()) => {
+                            let spawn_cwd = project_path.clone();
                             self.config
                                 .project
                                 .push(crate::config::settings::ProjectConfig {
@@ -716,6 +717,28 @@ impl App {
                                     agent: vec![],
                                 });
                             info!("Created project '{}'", project_name);
+
+                            // Auto-spawn a Terminal shell into the new project
+                            let pty_size = self.calculate_default_pty_size(self.last_area);
+                            match self.agent_manager.spawn(
+                                "Terminal".to_string(),
+                                project_name.clone(),
+                                self.config.global.default_shell.clone(),
+                                vec![],
+                                spawn_cwd,
+                                std::collections::HashMap::new(),
+                                pty_size,
+                            ) {
+                                Ok(id) => {
+                                    info!("Auto-spawned Terminal in project '{}'", project_name);
+                                    self.sidebar_state.select_agent(id);
+                                    self.populate_pane_agents();
+                                }
+                                Err(e) => {
+                                    warn!("Failed to auto-spawn Terminal: {}", e);
+                                }
+                            }
+
                             self.rebuild_sidebar();
                         }
                         Err(e) => warn!("Failed to create project: {}", e),
