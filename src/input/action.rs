@@ -125,6 +125,10 @@ pub enum Action {
     ScrollUp,
     /// Scroll down half a page in the terminal pane.
     ScrollDown,
+    /// Scroll up a few lines (mouse wheel).
+    MouseScrollUp,
+    /// Scroll down a few lines (mouse wheel).
+    MouseScrollDown,
     /// Jump to the next search match.
     SearchNext,
     /// Jump to the previous search match.

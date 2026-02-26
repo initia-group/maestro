@@ -289,6 +289,22 @@ impl AgentHandle {
         self.dirty = true;
     }
 
+    /// Scroll up by a fixed number of lines (mouse wheel).
+    pub fn mouse_scroll_up(&mut self, lines: usize) {
+        self.scrollback.mouse_scroll_up(lines);
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+        let max_scrollback = self.parser.screen().scrollback();
+        self.parser.screen_mut().set_scrollback(0);
+        self.scrollback.clamp_scroll(max_scrollback);
+        self.dirty = true;
+    }
+
+    /// Scroll down by a fixed number of lines (mouse wheel).
+    pub fn mouse_scroll_down(&mut self, lines: usize) {
+        self.scrollback.mouse_scroll_down(lines);
+        self.dirty = true;
+    }
+
     /// Get the current scroll offset.
     pub fn scroll_offset(&self) -> usize {
         self.scrollback.scroll_offset()

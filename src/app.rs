@@ -820,6 +820,22 @@ impl App {
                     self.dirty = true;
                 }
             }
+            Action::MouseScrollUp => {
+                if let Some(id) = self.get_focused_agent_id() {
+                    if let Some(handle) = self.agent_manager.get_mut(id) {
+                        handle.mouse_scroll_up(3);
+                    }
+                    self.dirty = true;
+                }
+            }
+            Action::MouseScrollDown => {
+                if let Some(id) = self.get_focused_agent_id() {
+                    if let Some(handle) = self.agent_manager.get_mut(id) {
+                        handle.mouse_scroll_down(3);
+                    }
+                    self.dirty = true;
+                }
+            }
 
             // Search
             Action::EnterSearchMode => {
