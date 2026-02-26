@@ -153,10 +153,10 @@ jobs:
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           TAG="${{ needs.prepare.outputs.tag }}"
-          SHA_AARCH64_DARWIN=$(grep "aarch64-apple-darwin" *.sha256 | awk '{print $1}')
-          SHA_X86_64_DARWIN=$(grep "x86_64-apple-darwin" *.sha256 | awk '{print $1}')
-          SHA_AARCH64_LINUX=$(grep "aarch64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
-          SHA_X86_64_LINUX=$(grep "x86_64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
+          SHA_AARCH64_DARWIN=$(grep -h "aarch64-apple-darwin" *.sha256 | awk '{print $1}')
+          SHA_X86_64_DARWIN=$(grep -h "x86_64-apple-darwin" *.sha256 | awk '{print $1}')
+          SHA_AARCH64_LINUX=$(grep -h "aarch64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
+          SHA_X86_64_LINUX=$(grep -h "x86_64-unknown-linux-gnu" *.sha256 | awk '{print $1}')
           mkdir -p Formula
           {
             echo 'class Maestro < Formula'
