@@ -631,6 +631,18 @@ impl App {
             Action::CancelRenameProject => {
                 self.dirty = true;
             }
+            Action::RemoveProject => {
+                if let Some(project_name) = self.sidebar_state.selected_project_name() {
+                    let name = project_name.to_string();
+                    match self.agent_manager.remove_project(&name) {
+                        Ok(()) => {
+                            self.rebuild_sidebar();
+                        }
+                        Err(e) => warn!("Delete project failed: {}", e),
+                    }
+                }
+                self.dirty = true;
+            }
 
             // Project lifecycle
             Action::EnterNewProjectMode => {
