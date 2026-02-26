@@ -511,6 +511,25 @@ impl AgentManager {
         Ok(())
     }
 
+    /// Remove an empty project from the display order.
+    ///
+    /// Returns `Err` if the project has agents or does not exist.
+    pub fn remove_project(&mut self, project_name: &str) -> Result<()> {
+        if let Some(pos) = self
+            .display_order
+            .iter()
+            .position(|(name, _)| name == project_name)
+        {
+            if !self.display_order[pos].1.is_empty() {
+                bail!("Project '{}' still has agents", project_name);
+            }
+            self.display_order.remove(pos);
+            Ok(())
+        } else {
+            bail!("Project '{}' not found", project_name);
+        }
+    }
+
     /// Remove a dead agent from all collections.
     ///
     /// The agent must already be in a terminal state (completed/errored).
@@ -540,7 +559,6 @@ impl AgentManager {
         for (_, ids) in &mut self.display_order {
             ids.retain(|&i| i != id);
         }
-        self.display_order.retain(|(_, ids)| !ids.is_empty());
     }
 
     /// Move the given agent one position earlier within its project group.

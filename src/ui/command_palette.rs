@@ -152,6 +152,13 @@ pub fn build_command_registry(templates: &[TemplateConfig]) -> Vec<PaletteComman
             parser: CommandParser::NoArgs(Action::EnterRenameProjectMode),
         },
         PaletteCommand {
+            keyword: "delete-project".into(),
+            description: "Delete the selected empty project".into(),
+            usage: "delete-project".into(),
+            has_args: false,
+            parser: CommandParser::NoArgs(Action::RemoveProject),
+        },
+        PaletteCommand {
             keyword: "quit".into(),
             description: "Quit Maestro".into(),
             usage: "quit".into(),
@@ -574,8 +581,8 @@ mod tests {
     #[test]
     fn test_build_registry_no_templates() {
         let commands = build_command_registry(&[]);
-        // Should have the 13 base commands (new, spawn, kill, restart, focus, rename, split, project, rename-project, config, help, quit, session clear)
-        assert_eq!(commands.len(), 13);
+        // Should have the 14 base commands (new, spawn, kill, restart, focus, rename, split, project, rename-project, delete-project, config, help, quit, session clear)
+        assert_eq!(commands.len(), 14);
     }
 
     #[test]
@@ -603,8 +610,8 @@ mod tests {
             },
         ];
         let commands = build_command_registry(&templates);
-        // 13 base + 2 template-specific
-        assert_eq!(commands.len(), 15);
+        // 14 base + 2 template-specific
+        assert_eq!(commands.len(), 16);
 
         // Template commands should be present
         assert!(commands.iter().any(|c| c.keyword == "spawn code-review"));

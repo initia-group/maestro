@@ -83,6 +83,8 @@ pub enum Action {
     ConfirmRenameProject { old_name: String, new_name: String },
     /// Cancel the project rename and return to Normal mode.
     CancelRenameProject,
+    /// Delete the currently selected project (must be empty).
+    RemoveProject,
     /// Move the selected agent one position up within its project.
     MoveAgentUp,
     /// Move the selected agent one position down within its project.
