@@ -52,6 +52,16 @@ impl ScrollbackBuffer {
         self.scroll_offset = self.scroll_offset.saturating_sub(page_height / 2);
     }
 
+    /// Scroll up by a fixed number of lines (for mouse wheel).
+    pub fn mouse_scroll_up(&mut self, lines: usize) {
+        self.scroll_offset += lines;
+    }
+
+    /// Scroll down by a fixed number of lines (for mouse wheel).
+    pub fn mouse_scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
     /// Whether we're currently scrolled (not at the bottom).
     pub fn is_scrolled(&self) -> bool {
         self.scroll_offset > 0
@@ -265,6 +275,33 @@ mod tests {
         buf.scroll_down(20);
         assert_eq!(buf.scroll_offset(), 0);
         assert!(!buf.is_scrolled());
+    }
+
+    #[test]
+    fn test_scrollback_buffer_mouse_scroll() {
+        let mut buf = ScrollbackBuffer::new(1024);
+        assert_eq!(buf.scroll_offset(), 0);
+
+        buf.mouse_scroll_up(3);
+        assert_eq!(buf.scroll_offset(), 3);
+        assert!(buf.is_scrolled());
+
+        buf.mouse_scroll_up(3);
+        assert_eq!(buf.scroll_offset(), 6);
+
+        buf.mouse_scroll_down(3);
+        assert_eq!(buf.scroll_offset(), 3);
+
+        buf.mouse_scroll_down(3);
+        assert_eq!(buf.scroll_offset(), 0);
+        assert!(!buf.is_scrolled());
+    }
+
+    #[test]
+    fn test_scrollback_buffer_mouse_scroll_down_saturates() {
+        let mut buf = ScrollbackBuffer::new(1024);
+        buf.mouse_scroll_down(5); // already at 0
+        assert_eq!(buf.scroll_offset(), 0);
     }
 
     #[test]

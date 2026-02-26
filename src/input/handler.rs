@@ -275,14 +275,14 @@ impl InputHandler {
             MouseEventKind::Up(MouseButton::Left) => Action::FinalizeSelection,
             MouseEventKind::ScrollUp => {
                 if is_over_pane(mouse.column, mouse.row, layout) {
-                    Action::ScrollUp
+                    Action::MouseScrollUp
                 } else {
                     Action::None
                 }
             }
             MouseEventKind::ScrollDown => {
                 if is_over_pane(mouse.column, mouse.row, layout) {
-                    Action::ScrollDown
+                    Action::MouseScrollDown
                 } else {
                     Action::None
                 }
@@ -1494,7 +1494,7 @@ mod tests {
         let layout = mock_layout(120, 40, 28);
         let mut handler = InputHandler::new();
         let action = handler.handle_mouse(mock_scroll_up(60, 10), &layout);
-        assert_eq!(action, Action::ScrollUp);
+        assert_eq!(action, Action::MouseScrollUp);
     }
 
     #[test]
@@ -1502,7 +1502,7 @@ mod tests {
         let layout = mock_layout(120, 40, 28);
         let mut handler = InputHandler::new();
         let action = handler.handle_mouse(mock_scroll_down(60, 10), &layout);
-        assert_eq!(action, Action::ScrollDown);
+        assert_eq!(action, Action::MouseScrollDown);
     }
 
     #[test]
