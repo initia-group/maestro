@@ -8,6 +8,10 @@ use crate::input::mode::{InputMode, NewProjectStep};
 use crate::ui::layout::AppLayout;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use std::time::Instant;
+
+/// Maximum time between two clicks to count as a double-click (milliseconds).
+const DOUBLE_CLICK_THRESHOLD_MS: u128 = 400;
 
 /// Mode-aware input handler that converts key events to actions.
 ///
@@ -17,6 +21,10 @@ use ratatui::layout::Rect;
 pub struct InputHandler {
     /// Current input mode.
     mode: InputMode,
+    /// Timestamp of the last left-click (for double-click detection).
+    last_click_time: Option<Instant>,
+    /// Absolute screen position of the last left-click.
+    last_click_pos: Option<(u16, u16)>,
 }
 
 impl Default for InputHandler {
@@ -29,6 +37,8 @@ impl InputHandler {
     pub fn new() -> Self {
         Self {
             mode: InputMode::Normal,
+            last_click_time: None,
+            last_click_pos: None,
         }
     }
 
@@ -295,17 +305,43 @@ impl InputHandler {
     fn handle_left_click(&mut self, col: u16, row: u16, layout: &AppLayout) -> Action {
         // Check if click is in the sidebar
         if is_in_rect(col, row, &layout.sidebar) {
+            self.last_click_time = None;
+            self.last_click_pos = None;
             let relative_row = row.saturating_sub(layout.sidebar.y);
             return Action::SidebarClick {
                 row: relative_row as usize,
             };
         }
 
-        // Check if click is in a terminal pane's inner area (start selection)
+        // Check if click is in a terminal pane's inner area
         for (i, pane) in layout.panes.iter().enumerate() {
             if is_in_rect(col, row, &pane.inner) {
                 let rel_row = row.saturating_sub(pane.inner.y);
                 let rel_col = col.saturating_sub(pane.inner.x);
+
+                // Double-click detection
+                let now = Instant::now();
+                let is_double_click = if let (Some(prev_time), Some(prev_pos)) =
+                    (self.last_click_time, self.last_click_pos)
+                {
+                    now.duration_since(prev_time).as_millis() < DOUBLE_CLICK_THRESHOLD_MS
+                        && prev_pos == (col, row)
+                } else {
+                    false
+                };
+
+                if is_double_click {
+                    self.last_click_time = None;
+                    self.last_click_pos = None;
+                    return Action::SelectWord {
+                        pane_index: i,
+                        row: rel_row,
+                        col: rel_col,
+                    };
+                }
+
+                self.last_click_time = Some(now);
+                self.last_click_pos = Some((col, row));
                 return Action::StartSelection {
                     pane_index: i,
                     row: rel_row,
