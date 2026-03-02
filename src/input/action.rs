@@ -157,6 +157,12 @@ pub enum Action {
         row: u16,
         col: u16,
     },
+    /// Select the word at the given pane-relative position (double-click).
+    SelectWord {
+        pane_index: usize,
+        row: u16,
+        col: u16,
+    },
     /// Update the text selection end position (mouse drag).
     UpdateSelection { row: u16, col: u16 },
     /// Finalize the selection (mouse release).

@@ -27,7 +27,8 @@ use crate::ui::sidebar::{ProjectAgents, Sidebar, SidebarState};
 use crate::ui::spawn_picker::SpawnPicker;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::terminal_pane::{
-    cursor_position, extract_selected_text, EmptyPane, TerminalPane, TextSelection,
+    cursor_position, extract_selected_text, find_word_boundaries, EmptyPane, TerminalPane,
+    TextSelection,
 };
 use crate::ui::theme::Theme;
 use chrono::Utc;
@@ -955,6 +956,31 @@ impl App {
             } => {
                 self.pane_manager.set_focused_pane(pane_index);
                 self.selection = Some(TextSelection::new(pane_index, row, col));
+                self.dirty = true;
+            }
+            Action::SelectWord {
+                pane_index,
+                row,
+                col,
+            } => {
+                self.pane_manager.set_focused_pane(pane_index);
+                if let Some(id) = self.get_pane_agent_id(pane_index) {
+                    if let Some(handle) = self.agent_manager.get(id) {
+                        let (start_col, end_col) = find_word_boundaries(handle.screen(), row, col);
+                        let mut sel = TextSelection::new(pane_index, row, start_col);
+                        sel.end = (row, end_col);
+                        self.selection = Some(sel);
+                    }
+                }
+                // Auto-copy word to clipboard (same pattern as FinalizeSelection)
+                if let Some(ref sel) = self.selection {
+                    if !sel.is_empty() {
+                        let sel = sel.clone();
+                        self.copy_selection_to_clipboard(&sel);
+                    } else {
+                        self.selection = None;
+                    }
+                }
                 self.dirty = true;
             }
             Action::UpdateSelection { row, col } => {

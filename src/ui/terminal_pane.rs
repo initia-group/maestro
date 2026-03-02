@@ -86,6 +86,43 @@ pub fn extract_selected_text(screen: &vt100::Screen, selection: &TextSelection) 
     result
 }
 
+/// Find word boundaries around the given column on a specific row of the screen.
+///
+/// Returns `(start_col, end_col)` as inclusive column indices of the word.
+/// A "word" is a contiguous run of alphanumeric or underscore characters.
+/// If the clicked position is not on a word character, returns `(col, col)`.
+pub fn find_word_boundaries(screen: &vt100::Screen, row: u16, col: u16) -> (u16, u16) {
+    let contents = screen.contents();
+    let lines: Vec<&str> = contents.lines().collect();
+    let row_idx = row as usize;
+    if row_idx >= lines.len() {
+        return (col, col);
+    }
+    let chars: Vec<char> = lines[row_idx].chars().collect();
+    let col_idx = col as usize;
+    if col_idx >= chars.len() || !is_word_char(chars[col_idx]) {
+        return (col, col);
+    }
+
+    // Expand left
+    let mut start = col_idx;
+    while start > 0 && is_word_char(chars[start - 1]) {
+        start -= 1;
+    }
+
+    // Expand right
+    let mut end = col_idx;
+    while end + 1 < chars.len() && is_word_char(chars[end + 1]) {
+        end += 1;
+    }
+
+    (start as u16, end as u16)
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
 /// Renders the terminal output of a single agent inside a bordered pane.
 ///
 /// The title bar shows: `Agent: <name> @ <project> [<status>]`
