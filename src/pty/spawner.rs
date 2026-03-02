@@ -7,6 +7,7 @@ use color_eyre::eyre::{eyre, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 /// Configuration for spawning a new process in a PTY.
 pub struct SpawnConfig {
@@ -47,6 +48,20 @@ pub fn spawn_in_pty(config: SpawnConfig) -> Result<SpawnResult> {
     // Set environment variables
     // Start with TERM so the child knows it's in a terminal
     cmd.env("TERM", "xterm-256color");
+
+    // Strip tmux-related variables to prevent the outer tmux session
+    // from leaking into agents. Without this, agents spawned inside
+    // tmux connect to the parent's tmux server, causing session bleed.
+    for key in &["TMUX", "TMUX_PANE", "TMUX_PLUGIN_MANAGER_PATH"] {
+        cmd.env_remove(*key);
+    }
+
+    // Give each agent its own tmux socket directory so that any tmux
+    // servers created by the agent are fully isolated from other agents.
+    let tmux_tmpdir = std::env::temp_dir().join(format!("maestro-tmux-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&tmux_tmpdir).ok();
+    cmd.env("TMUX_TMPDIR", &tmux_tmpdir);
+
     // Inherit selected env vars from parent
     for key in &["HOME", "USER", "PATH", "SHELL", "LANG", "LC_ALL"] {
         if let Ok(val) = std::env::var(key) {
