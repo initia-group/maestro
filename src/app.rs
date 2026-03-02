@@ -94,8 +94,17 @@ pub struct App {
     /// Transient status message shown in the status bar (auto-expires).
     status_message: Option<(String, Instant)>,
 
-    /// Pulse animation phase counter (0..7) for WaitingForInput indicators.
-    pulse_phase: u8,
+    /// Instant when the first WaitingForInput agent was detected (for pulse timing).
+    pulse_start: Option<Instant>,
+
+    /// Last rendered pulse phase (0..7) — avoids redundant redraws when phase hasn't changed.
+    last_pulse_phase: u8,
+
+    /// Cached flag: whether any agent is currently in WaitingForInput state.
+    has_waiting_agents: bool,
+
+    /// Cached help overlay lines (built once on first render, reused afterwards).
+    help_lines: Option<Vec<Line<'static>>>,
 }
 
 impl App {
@@ -140,7 +149,10 @@ impl App {
             config,
             selection: None,
             status_message: None,
-            pulse_phase: 0,
+            pulse_start: None,
+            last_pulse_phase: 0,
+            has_waiting_agents: false,
+            help_lines: None,
         }
     }
 
@@ -330,17 +342,33 @@ impl App {
                     self.dirty = true;
                 }
 
-                // Advance pulse phase and force re-render if any agent is waiting.
-                let counts = self.agent_manager.state_counts();
-                if counts.waiting > 0 {
-                    self.pulse_phase = (self.pulse_phase + 1) % 8;
-                    self.dirty = true;
-                } else {
-                    self.pulse_phase = 0;
+                // Update cached waiting flag for the pulse animation.
+                // The actual pulse phase is computed from wall-clock time in
+                // RenderRequest, so we don't force a redraw here.
+                let waiting = self.agent_manager.has_waiting();
+                if waiting && !self.has_waiting_agents {
+                    // First tick with waiting agents — start the pulse clock.
+                    self.pulse_start = Some(Instant::now());
+                } else if !waiting {
+                    self.pulse_start = None;
+                    self.last_pulse_phase = 0;
                 }
+                self.has_waiting_agents = waiting;
             }
 
             AppEvent::RenderRequest => {
+                // Compute pulse phase from wall-clock time and mark dirty
+                // only when the phase actually changes (avoids redundant redraws).
+                if let Some(start) = self.pulse_start {
+                    let elapsed_ms = start.elapsed().as_millis() as u64;
+                    // 8 phases over 1s cycle (125ms per phase).
+                    let phase = ((elapsed_ms / 125) % 8) as u8;
+                    if phase != self.last_pulse_phase {
+                        self.last_pulse_phase = phase;
+                        self.dirty = true;
+                    }
+                }
+
                 if self.dirty {
                     terminal.draw(|frame| self.render(frame))?;
                     self.dirty = false;
@@ -1098,7 +1126,11 @@ impl App {
         );
 
         // Render sidebar
-        let sidebar = Sidebar::new(&self.theme, self.config.ui.show_uptime, self.pulse_phase);
+        let sidebar = Sidebar::new(
+            &self.theme,
+            self.config.ui.show_uptime,
+            self.last_pulse_phase,
+        );
         frame.render_stateful_widget(sidebar, layout.sidebar, &mut self.sidebar_state);
 
         // Render terminal pane(s)
@@ -1133,7 +1165,7 @@ impl App {
                         .with_scroll_offset(handle.scroll_offset())
                         .with_search(handle.scrollback().search())
                         .with_selection(self.selection.as_ref().filter(|s| s.pane_index == i))
-                        .with_pulse_phase(self.pulse_phase);
+                        .with_pulse_phase(self.last_pulse_phase);
                         frame.render_widget(terminal_pane, pane.area);
 
                         // Set cursor position in Insert Mode (only when not scrolled)
@@ -1184,16 +1216,12 @@ impl App {
         frame.render_widget(status_bar, layout.status_bar);
 
         // Render command palette overlay if in Command mode
-        if let InputMode::Command {
-            ref input,
-            selected,
-        } = self.input_handler.mode().clone()
-        {
+        if let InputMode::Command { input, selected } = self.input_handler.mode() {
             let overlay_area = command_palette_area(area);
             let palette_widget = CommandPalette::new(
                 input,
                 &self.palette_suggestions,
-                selected,
+                *selected,
                 &self.palette_commands,
                 &self.theme,
             );
@@ -1201,9 +1229,9 @@ impl App {
         }
 
         // Render spawn picker overlay if in SpawnPicker mode
-        if let InputMode::SpawnPicker { selected } = self.input_handler.mode().clone() {
+        if let InputMode::SpawnPicker { selected } = self.input_handler.mode() {
             let overlay_area = spawn_picker_area(area);
-            let picker_widget = SpawnPicker::new(selected, &self.theme);
+            let picker_widget = SpawnPicker::new(*selected, &self.theme);
             frame.render_widget(picker_widget, overlay_area);
         }
 
@@ -1228,56 +1256,62 @@ impl App {
         }
     }
 
-    fn render_help_overlay(&self, frame: &mut Frame, area: Rect) {
+    fn render_help_overlay(&mut self, frame: &mut Frame, area: Rect) {
         let overlay_area = help_overlay_area(area);
 
         let clear = ratatui::widgets::Clear;
         frame.render_widget(clear, overlay_area);
 
-        let help_text = vec![
-            ("j/k", "Navigate agents"),
-            ("J/K", "Navigate projects"),
-            ("Alt+J/K", "Reorder agent down/up"),
-            ("1-9", "Jump to agent"),
-            ("Enter/i", "Enter Insert Mode (type to agent)"),
-            ("Ctrl+G", "Exit Insert Mode → Normal"),
-            ("n", "Spawn agent (pick type)"),
-            ("P", "New project"),
-            ("d", "Kill agent (press twice)"),
-            ("r", "Restart agent"),
-            ("R", "Rename agent"),
-            ("F2", "Rename project"),
-            ("s/v", "Split horizontal / vertical"),
-            ("Tab", "Cycle pane focus"),
-            ("Ctrl+W", "Close split"),
-            ("Mouse drag", "Select text (auto-copies)"),
-            ("Alt+C", "Copy selection"),
-            ("Ctrl+Shift+C", "Copy selection"),
-            ("Ctrl+U/D", "Scroll up / down"),
-            ("/", "Search in output"),
-            (":", "Command palette"),
-            ("X", "Clear saved session"),
-            ("?", "Toggle this help"),
-            ("q", "Quit (press twice if agents running)"),
-        ];
+        // Build help lines once and cache for subsequent frames.
+        if self.help_lines.is_none() {
+            let help_text: &[(&str, &str)] = &[
+                ("j/k", "Navigate agents"),
+                ("J/K", "Navigate projects"),
+                ("Alt+J/K", "Reorder agent down/up"),
+                ("1-9", "Jump to agent"),
+                ("Enter/i", "Enter Insert Mode (type to agent)"),
+                ("Ctrl+G", "Exit Insert Mode → Normal"),
+                ("n", "Spawn agent (pick type)"),
+                ("P", "New project"),
+                ("d", "Kill agent (press twice)"),
+                ("r", "Restart agent"),
+                ("R", "Rename agent"),
+                ("F2", "Rename project"),
+                ("s/v", "Split horizontal / vertical"),
+                ("Tab", "Cycle pane focus"),
+                ("Ctrl+W", "Close split"),
+                ("Mouse drag", "Select text (auto-copies)"),
+                ("Alt+C", "Copy selection"),
+                ("Ctrl+Shift+C", "Copy selection"),
+                ("Ctrl+U/D", "Scroll up / down"),
+                ("/", "Search in output"),
+                (":", "Command palette"),
+                ("X", "Clear saved session"),
+                ("?", "Toggle this help"),
+                ("q", "Quit (press twice if agents running)"),
+            ];
 
-        let lines: Vec<Line> = help_text
-            .iter()
-            .map(|(key, desc)| {
-                Line::from(vec![
-                    Span::styled(format!("{:>12}  ", key), self.theme.help_key),
-                    Span::styled(*desc, self.theme.help_description),
-                ])
-            })
-            .collect();
+            self.help_lines = Some(
+                help_text
+                    .iter()
+                    .map(|(key, desc)| {
+                        Line::from(vec![
+                            Span::styled(format!("{:>12}  ", key), self.theme.help_key),
+                            Span::styled(*desc, self.theme.help_description),
+                        ])
+                    })
+                    .collect(),
+            );
+        }
 
+        let lines = self.help_lines.as_ref().unwrap();
         let block = ratatui::widgets::Block::default()
             .title(" Help (? to close) ")
             .borders(ratatui::widgets::Borders::ALL)
             .border_style(self.theme.help_key)
             .style(ratatui::style::Style::default().bg(self.theme.help_overlay_bg));
 
-        let paragraph = ratatui::widgets::Paragraph::new(lines).block(block);
+        let paragraph = ratatui::widgets::Paragraph::new(lines.clone()).block(block);
         frame.render_widget(paragraph, overlay_area);
     }
 

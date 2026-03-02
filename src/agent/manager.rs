@@ -458,6 +458,16 @@ impl AgentManager {
         counts
     }
 
+    /// Check if any agent is in the WaitingForInput state.
+    ///
+    /// Short-circuits on the first match, avoiding a full iteration
+    /// when we only need a boolean answer (used by the pulse animation).
+    pub fn has_waiting(&self) -> bool {
+        self.agents
+            .values()
+            .any(|h| matches!(h.state(), AgentState::WaitingForInput { .. }))
+    }
+
     /// Total number of agents.
     pub fn agent_count(&self) -> usize {
         self.agents.len()
