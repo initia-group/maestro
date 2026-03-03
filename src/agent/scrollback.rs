@@ -32,12 +32,17 @@ impl ScrollbackBuffer {
     }
 
     /// Append new output bytes from the PTY.
+    ///
+    /// When the buffer exceeds `max_bytes`, trims in bulk (removes 25%
+    /// of capacity at once) to amortize the O(n) drain cost instead of
+    /// trimming on every single append that crosses the limit.
     pub fn append(&mut self, data: &[u8]) {
         self.raw_bytes.extend_from_slice(data);
 
-        // Trim from the front if we exceed max size
+        // Trim in bulk when over limit — keep 75% to amortize the drain cost
         if self.raw_bytes.len() > self.max_bytes {
-            let trim = self.raw_bytes.len() - self.max_bytes;
+            let keep = self.max_bytes * 3 / 4;
+            let trim = self.raw_bytes.len() - keep;
             self.raw_bytes.drain(..trim);
         }
     }

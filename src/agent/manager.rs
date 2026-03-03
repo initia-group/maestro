@@ -36,6 +36,14 @@ pub struct AgentManager {
 
     /// Global config reference for defaults.
     config: MaestroConfig,
+
+    /// Cached state counts — updated incrementally on state transitions
+    /// instead of recomputing by iterating all agents every render frame.
+    cached_counts: StateCounts,
+
+    /// Cached flat list of agent IDs in display order — refreshed when
+    /// agents are added, removed, or reordered.
+    cached_ordered_ids: Vec<AgentId>,
 }
 
 impl AgentManager {
@@ -50,6 +58,8 @@ impl AgentManager {
             detection_patterns,
             max_agents: config.global.max_agents,
             config: config.clone(),
+            cached_counts: StateCounts::default(),
+            cached_ordered_ids: Vec::new(),
         }
     }
 
@@ -127,8 +137,10 @@ impl AgentManager {
         let result = spawn_in_pty(spawn_config)?;
         let id = AgentId::new();
 
-        // Create vt100 parser with matching dimensions and 10000 lines of scrollback
-        let parser = vt100::Parser::new(pty_size.rows, pty_size.cols, 10000);
+        // Create vt100 parser with matching dimensions and 1000 lines of scrollback.
+        // The separate ScrollbackBuffer (10MB raw bytes) stores full history for
+        // search; the vt100 scrollback is only for scroll-up-to-view.
+        let parser = vt100::Parser::new(pty_size.rows, pty_size.cols, 1000);
 
         // Create PTY controller
         let pty_controller = PtyController::new(id, result.master, self.event_tx.clone())?;
@@ -151,6 +163,7 @@ impl AgentManager {
         // Add to collections
         self.agents.insert(id, handle);
         self.add_to_display_order(&project_name, id);
+        self.cached_counts.spawning += 1;
 
         info!("Agent '{}' spawned with ID {}", name, id);
         Ok(id)
@@ -200,14 +213,19 @@ impl AgentManager {
 
     /// Kill an agent by ID.
     pub fn kill(&mut self, id: AgentId) -> Result<()> {
-        match self.agents.get_mut(&id) {
+        let (old_state, new_state) = match self.agents.get_mut(&id) {
             Some(handle) => {
                 info!("Killing agent '{}'", handle.name());
+                let old_state = handle.state().clone();
                 handle.kill();
-                Ok(())
+                let new_state = handle.state().clone();
+                (old_state, new_state)
             }
             None => bail!("Agent {} not found", id),
-        }
+        };
+        Self::decrement_count(&mut self.cached_counts, &old_state);
+        Self::increment_count(&mut self.cached_counts, &new_state);
+        Ok(())
     }
 
     /// Restart an agent by ID. Kills the old one and spawns a new one.
@@ -379,7 +397,10 @@ impl AgentManager {
     pub fn kill_all(&mut self) {
         for handle in self.agents.values_mut() {
             if handle.state().is_alive() {
+                let old_state = handle.state().clone();
                 handle.kill();
+                Self::decrement_count(&mut self.cached_counts, &old_state);
+                Self::increment_count(&mut self.cached_counts, handle.state());
             }
         }
     }
@@ -442,20 +463,12 @@ impl AgentManager {
         &self.display_order
     }
 
-    /// Get the total count of agents in each state (for status bar).
+    /// Get the cached count of agents in each state (for status bar).
+    ///
+    /// Returns the incrementally-maintained cache instead of iterating
+    /// all agents. Updated on spawn, kill, remove, and state transitions.
     pub fn state_counts(&self) -> StateCounts {
-        let mut counts = StateCounts::default();
-        for handle in self.agents.values() {
-            match handle.state() {
-                AgentState::Spawning { .. } => counts.spawning += 1,
-                AgentState::Running { .. } => counts.running += 1,
-                AgentState::WaitingForInput { .. } => counts.waiting += 1,
-                AgentState::Idle { .. } => counts.idle += 1,
-                AgentState::Completed { .. } => counts.completed += 1,
-                AgentState::Errored { .. } => counts.errored += 1,
-            }
-        }
-        counts
+        self.cached_counts.clone()
     }
 
     /// Check if any agent is in the WaitingForInput state.
@@ -473,22 +486,28 @@ impl AgentManager {
         self.agents.len()
     }
 
-    /// Flat list of all agent IDs in display order.
-    pub fn all_agent_ids_ordered(&self) -> Vec<AgentId> {
-        self.display_order
-            .iter()
-            .flat_map(|(_, ids)| ids.iter().copied())
-            .collect()
+    /// Flat list of all agent IDs in display order (cached).
+    pub fn all_agent_ids_ordered(&self) -> &[AgentId] {
+        &self.cached_ordered_ids
     }
 
     // ---- State Detection ----
 
-    /// Run state detection on all agents. Called on every StateTick event.
+    /// Run state detection on non-terminal agents. Called on every StateTick event.
     /// Returns a list of (agent_id, old_state, new_state) for any agents that changed.
+    ///
+    /// Agents in terminal states (Completed/Errored) are skipped — they cannot
+    /// transition further and checking them wastes CPU on `try_wait()` and
+    /// screen scanning.
     pub fn detect_all_states(&mut self) -> Vec<(AgentId, AgentState, AgentState)> {
         let mut changes = Vec::new();
         let idle_timeout = self.config.global.idle_timeout_secs;
-        let agent_ids: Vec<AgentId> = self.agents.keys().copied().collect();
+        let agent_ids: Vec<AgentId> = self
+            .agents
+            .iter()
+            .filter(|(_, h)| !h.state().is_terminal())
+            .map(|(id, _)| *id)
+            .collect();
 
         for id in agent_ids {
             if let Some(handle) = self.agents.get_mut(&id) {
@@ -496,6 +515,8 @@ impl AgentManager {
                 if let Some(new_state) =
                     handle.detect_and_update(&self.detection_patterns, idle_timeout)
                 {
+                    self.decrement_state_count(&old_state);
+                    self.increment_state_count(&new_state);
                     changes.push((id, old_state, new_state));
                 }
             }
@@ -546,11 +567,54 @@ impl AgentManager {
     /// This removes it from the `agents` map and from the display order
     /// so it disappears from the sidebar immediately.
     pub fn remove(&mut self, id: AgentId) {
-        self.agents.remove(&id);
+        if let Some(handle) = self.agents.remove(&id) {
+            self.decrement_state_count(handle.state());
+        }
         self.remove_from_display_order(id);
     }
 
+    // ---- State Count Helpers ----
+
+    fn increment_state_count(&mut self, state: &AgentState) {
+        Self::increment_count(&mut self.cached_counts, state);
+    }
+
+    fn decrement_state_count(&mut self, state: &AgentState) {
+        Self::decrement_count(&mut self.cached_counts, state);
+    }
+
+    fn increment_count(counts: &mut StateCounts, state: &AgentState) {
+        match state {
+            AgentState::Spawning { .. } => counts.spawning += 1,
+            AgentState::Running { .. } => counts.running += 1,
+            AgentState::WaitingForInput { .. } => counts.waiting += 1,
+            AgentState::Idle { .. } => counts.idle += 1,
+            AgentState::Completed { .. } => counts.completed += 1,
+            AgentState::Errored { .. } => counts.errored += 1,
+        }
+    }
+
+    fn decrement_count(counts: &mut StateCounts, state: &AgentState) {
+        match state {
+            AgentState::Spawning { .. } => counts.spawning = counts.spawning.saturating_sub(1),
+            AgentState::Running { .. } => counts.running = counts.running.saturating_sub(1),
+            AgentState::WaitingForInput { .. } => counts.waiting = counts.waiting.saturating_sub(1),
+            AgentState::Idle { .. } => counts.idle = counts.idle.saturating_sub(1),
+            AgentState::Completed { .. } => counts.completed = counts.completed.saturating_sub(1),
+            AgentState::Errored { .. } => counts.errored = counts.errored.saturating_sub(1),
+        }
+    }
+
     // ---- Internal ----
+
+    /// Rebuild the cached flat list of agent IDs from display_order.
+    fn refresh_ordered_ids_cache(&mut self) {
+        self.cached_ordered_ids = self
+            .display_order
+            .iter()
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+    }
 
     fn add_to_display_order(&mut self, project_name: &str, id: AgentId) {
         if let Some((_, ids)) = self
@@ -563,12 +627,14 @@ impl AgentManager {
             self.display_order
                 .push((project_name.to_string(), vec![id]));
         }
+        self.refresh_ordered_ids_cache();
     }
 
     fn remove_from_display_order(&mut self, id: AgentId) {
         for (_, ids) in &mut self.display_order {
             ids.retain(|&i| i != id);
         }
+        self.refresh_ordered_ids_cache();
     }
 
     /// Move the given agent one position earlier within its project group.
@@ -577,6 +643,7 @@ impl AgentManager {
             if let Some(pos) = ids.iter().position(|&i| i == id) {
                 if pos > 0 {
                     ids.swap(pos - 1, pos);
+                    self.refresh_ordered_ids_cache();
                 }
                 return;
             }
@@ -589,6 +656,7 @@ impl AgentManager {
             if let Some(pos) = ids.iter().position(|&i| i == id) {
                 if pos + 1 < ids.len() {
                     ids.swap(pos, pos + 1);
+                    self.refresh_ordered_ids_cache();
                 }
                 return;
             }

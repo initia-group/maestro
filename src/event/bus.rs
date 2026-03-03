@@ -59,6 +59,16 @@ impl EventBus {
         self.rx.recv().await
     }
 
+    /// Try to receive the next event without blocking.
+    /// Returns `None` if the channel is empty or closed.
+    ///
+    /// Used by the main loop to drain all pending events after handling
+    /// an awaited event, coalescing bursts of PTY output into a single
+    /// dirty-render cycle.
+    pub fn try_next(&mut self) -> Option<AppEvent> {
+        self.rx.try_recv().ok()
+    }
+
     /// Start the crossterm event reader task.
     ///
     /// Reads terminal events via [`EventStream`] (futures-based) and forwards
