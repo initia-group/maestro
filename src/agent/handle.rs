@@ -376,10 +376,10 @@ impl AgentHandle {
         // Throttle detection for idle agents: skip if checked within 2 seconds.
         // New PTY output resets this via process_output() setting dirty, and
         // the visual terminal updates immediately regardless.
-        if matches!(self.state, AgentState::Idle { .. }) {
-            if self.last_detection_at.elapsed() < Duration::from_secs(2) {
-                return None;
-            }
+        if matches!(self.state, AgentState::Idle { .. })
+            && self.last_detection_at.elapsed() < Duration::from_secs(2)
+        {
+            return None;
         }
         self.last_detection_at = Instant::now();
 
