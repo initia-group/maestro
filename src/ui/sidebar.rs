@@ -208,6 +208,11 @@ impl SidebarState {
         &self.items
     }
 
+    /// Get a mutable reference to the item list for in-place state updates.
+    pub fn items_mut(&mut self) -> &mut [SidebarItem] {
+        &mut self.items
+    }
+
     /// Select a specific agent by ID.
     pub fn select_agent(&mut self, agent_id: AgentId) {
         for (i, item) in self.items.iter().enumerate() {

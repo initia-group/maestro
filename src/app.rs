@@ -23,7 +23,7 @@ use crate::ui::layout::{
     pane_to_pty_size, spawn_picker_area, ActiveLayout, MIN_COLS, MIN_ROWS,
 };
 use crate::ui::pane_manager::PaneManager;
-use crate::ui::sidebar::{ProjectAgents, Sidebar, SidebarState};
+use crate::ui::sidebar::{ProjectAgents, Sidebar, SidebarItem, SidebarState};
 use crate::ui::spawn_picker::SpawnPicker;
 use crate::ui::status_bar::StatusBar;
 use crate::ui::terminal_pane::{
@@ -196,7 +196,18 @@ impl App {
         // Main event loop
         while self.running {
             match event_bus.next().await {
-                Some(event) => self.handle_event(event, terminal)?,
+                Some(event) => {
+                    self.handle_event(event, terminal)?;
+                    // Drain all pending events before awaiting again.
+                    // This coalesces bursts of PTY output into a single
+                    // dirty-render cycle instead of processing one at a time.
+                    while let Some(pending) = event_bus.try_next() {
+                        self.handle_event(pending, terminal)?;
+                        if !self.running {
+                            break;
+                        }
+                    }
+                }
                 None => {
                     warn!("Event bus closed unexpectedly");
                     break;
@@ -305,7 +316,7 @@ impl App {
                     "Agent {} state: {:?} -> {:?}",
                     agent_id, old_state, new_state
                 );
-                self.rebuild_sidebar();
+                self.update_sidebar_states();
                 self.dirty = true;
             }
 
@@ -324,6 +335,7 @@ impl App {
                     })
                     .collect();
 
+                let had_stale_retries = !stale_ids.is_empty();
                 for id in stale_ids {
                     let pty_size = self.calculate_default_pty_size(self.last_area);
                     match self.agent_manager.retry_without_resume(id, pty_size) {
@@ -338,7 +350,13 @@ impl App {
                 }
 
                 if needs_rebuild {
-                    self.rebuild_sidebar();
+                    if !had_stale_retries {
+                        // State-only changes: update in-place (no agents added/removed)
+                        self.update_sidebar_states();
+                    } else {
+                        // Stale retry spawned new agent(s): full rebuild needed
+                        self.rebuild_sidebar();
+                    }
                     self.populate_pane_agents();
                     self.dirty = true;
                 }
@@ -1686,6 +1704,30 @@ impl App {
             .collect();
 
         self.sidebar_state.rebuild(&projects);
+    }
+
+    /// Update only state, uptime, and unread flags in existing sidebar items.
+    ///
+    /// Much cheaper than `rebuild_sidebar()` — avoids reallocating the item
+    /// list and cloning agent names. Use this for state-only changes (e.g.,
+    /// Running -> Idle transitions) where the agent set hasn't changed.
+    fn update_sidebar_states(&mut self) {
+        for item in self.sidebar_state.items_mut() {
+            if let SidebarItem::Agent {
+                id,
+                state,
+                uptime,
+                has_unread_result,
+                ..
+            } = item
+            {
+                if let Some(handle) = self.agent_manager.get(*id) {
+                    *state = handle.state().clone();
+                    *uptime = handle.uptime();
+                    *has_unread_result = handle.has_unread_result();
+                }
+            }
+        }
     }
 
     fn calculate_default_pty_size(&self, area: Rect) -> portable_pty::PtySize {

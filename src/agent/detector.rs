@@ -381,15 +381,66 @@ fn extract_error_hint(lines: &[String]) -> Option<String> {
     None
 }
 
-/// Extract the bottom N lines from a vt100 screen as plain-text strings.
+/// Extract the bottom N non-empty lines from a vt100 screen as plain-text strings.
 ///
-/// Uses `screen.contents()` which returns plain text (no ANSI codes),
-/// avoiding the need for escape-code stripping.
+/// Scans the screen from bottom to top to find the last row with content,
+/// then returns up to N lines ending at that row. Uses cell-by-cell access
+/// instead of `screen.contents()` to avoid building a full screen string.
+/// This is much cheaper for state detection, which only needs a few bottom
+/// lines and runs every 250ms across all agents.
 pub fn extract_screen_lines(screen: &vt100::Screen, n: usize) -> Vec<String> {
-    let contents = screen.contents();
-    let all_lines: Vec<&str> = contents.lines().collect();
-    let start = all_lines.len().saturating_sub(n);
-    all_lines[start..].iter().map(|s| s.to_string()).collect()
+    let (rows, cols) = screen.size();
+    let rows = rows as usize;
+    let cols = cols as usize;
+
+    // Find the last non-empty row by scanning from bottom
+    let mut last_content_row: Option<usize> = None;
+    for row in (0..rows).rev() {
+        for col in 0..cols {
+            if let Some(cell) = screen.cell(row as u16, col as u16) {
+                let ch = cell.contents();
+                if !ch.is_empty() && ch != " " {
+                    last_content_row = Some(row);
+                    break;
+                }
+            }
+        }
+        if last_content_row.is_some() {
+            break;
+        }
+    }
+
+    let last_row = match last_content_row {
+        Some(r) => r,
+        None => return Vec::new(), // Screen is entirely empty
+    };
+
+    // Read the bottom N rows up to and including last_content_row
+    let start_row = (last_row + 1).saturating_sub(n);
+    let mut lines = Vec::with_capacity(n);
+
+    for row in start_row..=last_row {
+        let mut line = String::with_capacity(cols);
+        let mut last_non_space = 0;
+        for col in 0..cols {
+            if let Some(cell) = screen.cell(row as u16, col as u16) {
+                let ch = cell.contents();
+                if ch.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(ch);
+                }
+                if !ch.is_empty() && ch != " " {
+                    last_non_space = line.len();
+                }
+            } else {
+                line.push(' ');
+            }
+        }
+        line.truncate(last_non_space);
+        lines.push(line);
+    }
+    lines
 }
 
 /// Anti-flapping debounce for state transitions.

@@ -17,6 +17,7 @@ use color_eyre::eyre::Result;
 use portable_pty::{Child, PtySize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 /// All resources and metadata for a single agent.
 pub struct AgentHandle {
@@ -78,6 +79,10 @@ pub struct AgentHandle {
     /// Whether this agent completed/errored and the user hasn't viewed it yet.
     /// Set to `true` on transition to a terminal state; cleared when selected.
     has_unread_result: bool,
+
+    /// When state detection was last run for this agent.
+    /// Used to throttle detection frequency for idle agents.
+    last_detection_at: Instant,
 }
 
 impl AgentHandle {
@@ -116,6 +121,7 @@ impl AgentHandle {
             session_id,
             resume_retry_attempted: false,
             has_unread_result: false,
+            last_detection_at: Instant::now(),
         }
     }
 
@@ -358,11 +364,25 @@ impl AgentHandle {
 
     /// Run state detection and update the internal state.
     /// Returns `Some(new_state)` if the state changed, `None` otherwise.
+    ///
+    /// Idle agents are throttled to check at most every 2 seconds instead
+    /// of every 250ms tick, since they haven't produced output recently and
+    /// are unlikely to change state without new PTY output.
     pub fn detect_and_update(
         &mut self,
         patterns: &DetectionPatterns,
         idle_timeout_secs: u64,
     ) -> Option<AgentState> {
+        // Throttle detection for idle agents: skip if checked within 2 seconds.
+        // New PTY output resets this via process_output() setting dirty, and
+        // the visual terminal updates immediately regardless.
+        if matches!(self.state, AgentState::Idle { .. })
+            && self.last_detection_at.elapsed() < Duration::from_secs(2)
+        {
+            return None;
+        }
+        self.last_detection_at = Instant::now();
+
         // Check process exit
         let process_exited = match self.child.try_wait() {
             Ok(Some(status)) => Some(ProcessExit {
